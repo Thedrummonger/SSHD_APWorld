@@ -38,7 +38,7 @@ python build_apworld.py
 ### 0. Install Python and dependencies
 
 - Install Python 3.10 or higher (MAKE SURE TO ADD IT TO PATH)
-- Install the dependencies from [requirements.txt](requirements.txt)
+- Download and install the dependencies from [requirements.txt](requirements.txt) using either `pip install -r requirements.txt` or if that doesn't work `pip install --target="C:\ProgramData\Archipelago\lib" -r requirements.txt`
 
 ### 1. Install the APWorld and other files
 
