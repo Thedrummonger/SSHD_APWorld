@@ -702,6 +702,563 @@ class LanaryuCavesKeys(Choice):
     default = 1
 
 
+# === Quality of Life Shortcuts ===
+
+class ShortcutIosBridgeComplete(Toggle):
+    """
+    If enabled, the Isle of Songs bridge puzzle is solved from the start.
+    """
+    display_name = "Isle of Songs Bridge Complete"
+
+
+class ShortcutSpiralLogToBtt(Toggle):
+    """
+    If enabled, the log between Sealed Grounds Spiral and Behind the Temple is pushed down.
+    """
+    display_name = "Sealed Spiral Log to Behind the Temple"
+
+
+class ShortcutLogNearMachi(Toggle):
+    """
+    If enabled, logs near Faron Woods entry are pushed down.
+    """
+    display_name = "Faron Woods Logs near Entry"
+
+
+class ShortcutFaronLogToFloria(Toggle):
+    """
+    If enabled, the log from Faron Woods to after Lake Floria is pushed down.
+    """
+    display_name = "Faron Woods Log to Lake Floria"
+
+
+class ShortcutDeepWoodsLogBeforeTightrope(Toggle):
+    """
+    If enabled, the log before Deep Woods tightrope is pushed down.
+    """
+    display_name = "Deep Woods Log before Tightrope"
+
+
+class ShortcutDeepWoodsLogBeforeTemple(Toggle):
+    """
+    If enabled, the log before Deep Woods temple is pushed down.
+    """
+    display_name = "Deep Woods Log before Temple"
+
+
+class ShortcutEldinEntranceBoulder(Toggle):
+    """
+    If enabled, the boulder at Eldin Volcano entrance is blown up.
+    """
+    display_name = "Eldin Volcano Entrance Boulder"
+
+
+class ShortcutEldinAscentBoulder(Toggle):
+    """
+    If enabled, the boulder near Volcano Ascent is blown up.
+    """
+    display_name = "Eldin Volcano Boulder near Ascent"
+
+
+class ShortcutVsFlames(Toggle):
+    """
+    If enabled, flames in Volcano Summit are removed.
+    """
+    display_name = "Volcano Summit Flames"
+
+
+class ShortcutLanayruBars(Toggle):
+    """
+    If enabled, bars separating Lanayru Desert from Stone Cache are raised.
+    """
+    display_name = "Lanayru Desert Bars near Stone Cache"
+
+
+class ShortcutWestWallMinecart(Toggle):
+    """
+    If enabled, minecart on West Wall is pushed down.
+    """
+    display_name = "Lanayru Desert Minecart on West Wall"
+
+
+class ShortcutSandOasisMinecart(Toggle):
+    """
+    If enabled, minecart in Sand Oasis is pushed down.
+    """
+    display_name = "Lanayru Desert Minecart in Sand Oasis"
+
+
+class ShortcutMinecartBeforeCaves(Toggle):
+    """
+    If enabled, minecart before Lanayru Caves is pushed down.
+    """
+    display_name = "Lanayru Desert Minecart before Caves"
+
+
+class ShortcutSkyviewBoards(Toggle):
+    """
+    If enabled, wooden boards in Skyview Temple are destroyed.
+    """
+    display_name = "Skyview Temple Boarded Shortcut"
+
+
+class ShortcutSkyviewBars(Toggle):
+    """
+    If enabled, bars before Skyview Temple boss door are raised.
+    """
+    display_name = "Skyview Temple Bars before Boss Door"
+
+
+class ShortcutEarthTempleBridge(Toggle):
+    """
+    If enabled, the bridge in Earth Temple main room is raised.
+    """
+    display_name = "Earth Temple Pegs Bridge"
+
+
+class ShortcutLmfWindGates(Toggle):
+    """
+    If enabled, wind gates in Lanayru Mining Facility hub are raised.
+    """
+    display_name = "Lanayru Mining Facility Wind Gates"
+
+
+class ShortcutLmfBoxes(Toggle):
+    """
+    If enabled, pushable boxes in Lanayru Mining Facility are pushed.
+    """
+    display_name = "Lanayru Mining Facility Pushable Boxes"
+
+
+class ShortcutLmfBarsToWestSide(Toggle):
+    """
+    If enabled, bars to west side in Lanayru Mining Facility are raised.
+    """
+    display_name = "Lanayru Mining Facility Bars to West Side"
+
+
+class ShortcutAcBridge(Toggle):
+    """
+    If enabled, the bridge to basement in Ancient Cistern is extended.
+    """
+    display_name = "Ancient Cistern Bridge to Basement"
+
+
+class ShortcutAcWaterVents(Toggle):
+    """
+    If enabled, water vents in Ancient Cistern are opened.
+    """
+    display_name = "Ancient Cistern Water Vents"
+
+
+class ShortcutSandshipWindows(Toggle):
+    """
+    If enabled, windows below life boat in Sandship are opened.
+    """
+    display_name = "Sandship Windows below Life Boat"
+
+
+class ShortcutSandshipBrigBars(Toggle):
+    """
+    If enabled, bars before brig in Sandship are raised.
+    """
+    display_name = "Sandship Bars before Brig"
+
+
+class ShortcutFsOutsideBars(Toggle):
+    """
+    If enabled, bars between outdoor bridges in Fire Sanctuary are raised.
+    """
+    display_name = "Fire Sanctuary Bars between Outdoor Bridges"
+
+
+class ShortcutFsLavaFlow(Toggle):
+    """
+    If enabled, lava river at end of Fire Sanctuary is flowing.
+    """
+    display_name = "Fire Sanctuary Skip Lava Flow"
+
+
+class ShortcutSkyKeepSvtRoomBars(Toggle):
+    """
+    If enabled, bars in Skyview Temple room in Sky Keep are raised.
+    """
+    display_name = "Sky Keep Bars in Skyview Temple Room"
+
+
+class ShortcutSkyKeepFsRoomLowerBars(Toggle):
+    """
+    If enabled, lower bars in Fire Sanctuary room in Sky Keep are raised.
+    """
+    display_name = "Sky Keep Lower Bars in Fire Sanctuary Room"
+
+
+class ShortcutSkyKeepFsRoomUpperBars(Toggle):
+    """
+    If enabled, upper bars in Fire Sanctuary room in Sky Keep are raised.
+    """
+    display_name = "Sky Keep Upper Bars in Fire Sanctuary Room"
+
+
+# === Logic Tricks/Advanced Options ===
+
+class LogicEarlyLakeFloria(Toggle):
+    """
+    If enabled, you may need to enter Lake Floria using jumpslash tricks.
+    """
+    display_name = "Early Lake Floria Jumpslash"
+
+
+class LogicBeedlesIslandCageChestDive(Toggle):
+    """
+    If enabled, you may need to skydive into cage on Beedle's Island.
+    """
+    display_name = "Beedle's Island Cage Chest Dive"
+
+
+class LogicVolcanicIslandDive(Toggle):
+    """
+    If enabled, you may need to skydive onto Volcanic Island.
+    """
+    display_name = "Volcanic Island Dive"
+
+
+class LogicEastIslandDive(Toggle):
+    """
+    If enabled, you may need to skydive onto archway inside Thunderhead.
+    """
+    display_name = "Inside the Thunderhead East Island Dive"
+
+
+class LogicAdvancedLizalfosCombat(Toggle):
+    """
+    If enabled, you may need to defeat Lizalfos with bombs or bow only.
+    """
+    display_name = "Advanced Lizalfos Combat"
+
+
+class LogicLongRangedSkywardStrikes(Toggle):
+    """
+    If enabled, you may need to perform long-ranged Skyward Strikes.
+    """
+    display_name = "Long Ranged Skyward Strikes"
+
+
+class LogicGravestoneJump(Toggle):
+    """
+    If enabled, you may need to jump on gravestones to reach Batreaux's door.
+    """
+    display_name = "Gravestone Jump"
+
+
+class LogicWaterfallCaveJump(Toggle):
+    """
+    If enabled, you may need to dive and skydive to enter Waterfall Cave.
+    """
+    display_name = "Waterfall Cave Jump"
+
+
+class LogicBirdNestItemFromBeedlesShop(Toggle):
+    """
+    If enabled, you may need to access Bird's Nest using Beedle's Airshop.
+    """
+    display_name = "Bird's Nest from Beedle's Airshop"
+
+
+class LogicBeedlesShopWithBombs(Toggle):
+    """
+    If enabled, you may need to use bomb explosions to hit Beedle's shop bell.
+    """
+    display_name = "Beedle's Airshop with Bombs"
+
+
+class LogicStutterSprint(Toggle):
+    """
+    If enabled, you may need to use stuttersprint to cross quicksand or slopes.
+    """
+    display_name = "Stutter Sprinting"
+
+
+class LogicPreciseBeetle(Toggle):
+    """
+    If enabled, you may need to precisely control Beetle for distant checks.
+    """
+    display_name = "Precise Beetle Flying"
+
+
+class LogicPreciseBombThrows(Toggle):
+    """
+    If enabled, you may need to time bomb throws for switches or targets.
+    """
+    display_name = "Precise Bomb Throws"
+
+
+class LogicFaronWoodsWithGroosenator(Toggle):
+    """
+    If enabled, you may need to use Groosenator to unlock Flooded Faron Woods statues.
+    """
+    display_name = "Faron Woods with Groosenator"
+
+
+class LogicItemlessFirstTimeshift(Toggle):
+    """
+    If enabled, you may need to activate first Lanayru Mine timeshift stone without items.
+    """
+    display_name = "Itemless First Timeshift Stone"
+
+
+class LogicStaminaPotionThroughSinkSand(Toggle):
+    """
+    If enabled, you may need to use stamina potion to traverse sink sand.
+    """
+    display_name = "Stamina Potion through Sink Sand"
+
+
+class LogicBrakeslide(Toggle):
+    """
+    If enabled, you may need to use brakeslide glitch.
+    """
+    display_name = "Brakesliding"
+
+
+class LogicLanayruMineQuickBomb(Toggle):
+    """
+    If enabled, you may need to use Bomb Bag in Lanayru Mine.
+    """
+    display_name = "Lanayru Mine Quick Bomb"
+
+
+class LogicTotSkipBrakeslide(Toggle):
+    """
+    If enabled, you may need to brakeslide to reach east Lanayru Desert from Temple of Time.
+    """
+    display_name = "Temple of Time Skip Brakeslide"
+
+
+class LogicTotSlingshot(Toggle):
+    """
+    If enabled, you may need to use Slingshot to activate Temple of Time timeshift stone.
+    """
+    display_name = "Temple of Time Precise Slingshot"
+
+
+class LogicFireNodeWithoutHookBeetle(Toggle):
+    """
+    If enabled, you may need to activate Fire Node without Hook Beetle.
+    """
+    display_name = "Activate Fire Node without Hook Beetle"
+
+
+class LogicCactusBombWhip(Toggle):
+    """
+    If enabled, you may need to use Whip to pick bombs from cacti.
+    """
+    display_name = "Whip Bomb Flowers off Cacti"
+
+
+class LogicSkippersRetreatFastClawshots(Toggle):
+    """
+    If enabled, you may need to use Clawshots to stun Deku Baba in Skipper's Retreat.
+    """
+    display_name = "Skipper's Retreat Fast Clawshots"
+
+
+class LogicSkyviewSpiderRoll(Toggle):
+    """
+    If enabled, you may need to roll next to Skultullas in Skyview Temple.
+    """
+    display_name = "Skyview Temple Spider Roll"
+
+
+class LogicSkyviewCoiledRupeeJump(Toggle):
+    """
+    If enabled, you may need to jump-slash for Coiled Branch rupee in Skyview Temple.
+    """
+    display_name = "Skyview Coiled Rupee Jump"
+
+
+class LogicSkyviewPreciseSlingshot(Toggle):
+    """
+    If enabled, you may need to use Slingshot to hit crystal in Skyview Temple.
+    """
+    display_name = "Skyview Temple Precise Slingshot"
+
+
+class LogicEarthTempleKeeseSkywardStrike(Toggle):
+    """
+    If enabled, you may need to use long-range Skyward Strike on Keese in Earth Temple.
+    """
+    display_name = "Earth Temple Keese Skyward Strike"
+
+
+class LogicEarthTempleSlopeStuttersprint(Toggle):
+    """
+    If enabled, you may need to use stuttersprint on Earth Temple slope.
+    """
+    display_name = "Earth Temple Slope Stuttersprint"
+
+
+class LogicEarthTempleBomblessScaldera(Toggle):
+    """
+    If enabled, you may need to defeat Scaldera without Bomb Bag.
+    """
+    display_name = "Earth Temple Bomb Flower Scaldera"
+
+
+class LogicLmfWhipSwitch(Toggle):
+    """
+    If enabled, you may need to use Whip to flip lever in Lanayru Mining Facility.
+    """
+    display_name = "Lanayru Mining Facility Whip Switch"
+
+
+class LogicLmfCeilingPreciseSlingshot(Toggle):
+    """
+    If enabled, you may need to use Slingshot to hit timeshift stone in Lanayru Mining Facility.
+    """
+    display_name = "Lanayru Mining Facility Precise Slingshot"
+
+
+class LogicLmfWhipTimeshiftStone(Toggle):
+    """
+    If enabled, you may need to use Whip to hit timeshift stone in Lanayru Mining Facility.
+    """
+    display_name = "Lanayru Mining Facility Whip Timeshift Stone"
+
+
+class LogicLmfMinecartJump(Toggle):
+    """
+    If enabled, you may need to jump onto minecart in Lanayru Mining Facility.
+    """
+    display_name = "Lanayru Mining Facility Ride on Minecart"
+
+
+class LogicLmfBellowslessMoldarach(Toggle):
+    """
+    If enabled, you may need to defeat Moldarach without Gust Bellows.
+    """
+    display_name = "Lanayru Mining Facility Moldarach without Gust Bellows"
+
+
+class LogicAcLeverJumpTrick(Toggle):
+    """
+    If enabled, you may need to jump down to flip waterfall lever in Ancient Cistern.
+    """
+    display_name = "Ancient Cistern Lever Jump"
+
+
+class LogicAcChestAfterWhipHooksJump(Toggle):
+    """
+    If enabled, you may need to jump for chest in Ancient Cistern.
+    """
+    display_name = "Ancient Cistern Chest after Whip Hooks Jump"
+
+
+class LogicSandshipJumpToStern(Toggle):
+    """
+    If enabled, you may need to sidehop to Sandship stern.
+    """
+    display_name = "Sandship Jump to Stern"
+
+
+class LogicSandshipItemlessSpume(Toggle):
+    """
+    If enabled, you may need to get past Spume in Sandship without items.
+    """
+    display_name = "Sandship Itemless Spume"
+
+
+class LogicSandshipNoCombinationHint(Toggle):
+    """
+    If enabled, you may need to open Sandship combination lock without hint.
+    """
+    display_name = "Sandship No Combination Hint"
+
+
+class LogicFsPillarJump(Toggle):
+    """
+    If enabled, you may need to jump around pillars on broken bridge in Fire Sanctuary.
+    """
+    display_name = "Fire Sanctuary Pillar Jump"
+
+
+class LogicFsPracticeSwordGhirahim2(Toggle):
+    """
+    If enabled, you may need to defeat Ghirahim 2 with Practice Sword.
+    """
+    display_name = "Fire Sanctuary Ghirahim 2 with Practice Sword"
+
+
+class LogicPresentBowSwitches(Toggle):
+    """
+    If enabled, you may need to hit Bow switches in present with barbed wire.
+    """
+    display_name = "Present Bow Switch Shots"
+
+
+class LogicSkyKeepVineClip(Toggle):
+    """
+    If enabled, you may need to clip through vines in Sky Keep.
+    """
+    display_name = "Sky Keep Vine Clip"
+
+
+# === Cosmetic Options ===
+
+class TunicSwap(Toggle):
+    """
+    If enabled, Link wears his Skyloft outfit instead of green knight uniform.
+    """
+    display_name = "Tunic Swap"
+
+
+class LightnningSkywardStrike(Toggle):
+    """
+    If enabled, Skyward strikes have lightning effects at all times.
+    """
+    display_name = "Lightning Skyward Strike"
+
+
+class StarrySky(Toggle):
+    """
+    If enabled, stars appear in the sky during day and night.
+    """
+    display_name = "Starry Skies"
+
+
+class RemoveEnemyMusic(Toggle):
+    """
+    If enabled, enemy drums won't interrupt background music.
+    """
+    display_name = "Remove Enemy Music"
+
+
+# === Extra Starting Inventory ===
+
+class StartingHearts(Range):
+    """
+    Number of hearts to start with.
+    """
+    display_name = "Starting Hearts"
+    range_start = 6
+    range_end = 18
+    default = 6
+
+
+class StartWithAllBugs(Toggle):
+    """
+    If enabled, start with 99 of each bug.
+    """
+    display_name = "Start with All Bugs"
+
+
+class StartWithAllTreasures(Toggle):
+    """
+    If enabled, start with 99 of each treasure.
+    """
+    display_name = "Start with All Treasures"
+
+
 class ExtractPath(FreeText):
     """
     Path to the extracted SSHD romfs folder.
@@ -732,9 +1289,6 @@ class SettingString(FreeText):
     """
     display_name = "Setting String"
     default = ""
-
-
-# === Traps ===
 
 # === Archipelago-specific ===
 
@@ -821,7 +1375,103 @@ class SSHDOptions(PerGameCommonOptions):
     empty_unrequired_dungeons: EmptyUnrequiredDungeons
     lanayru_caves_keys: LanaryuCavesKeys
     
-    # Starting Inventory
+    # Quality of Life Shortcuts
+    shortcut_ios_bridge_complete: ShortcutIosBridgeComplete
+    shortcut_spiral_log_to_btt: ShortcutSpiralLogToBtt
+    shortcut_logs_near_machi: ShortcutLogNearMachi
+    shortcut_faron_log_to_floria: ShortcutFaronLogToFloria
+    shortcut_deep_woods_log_before_tightrope: ShortcutDeepWoodsLogBeforeTightrope
+    shortcut_deep_woods_log_before_temple: ShortcutDeepWoodsLogBeforeTemple
+    shortcut_eldin_entrance_boulder: ShortcutEldinEntranceBoulder
+    shortcut_eldin_ascent_boulder: ShortcutEldinAscentBoulder
+    shortcut_vs_flames: ShortcutVsFlames
+    shortcut_lanayru_bars: ShortcutLanayruBars
+    shortcut_west_wall_minecart: ShortcutWestWallMinecart
+    shortcut_sand_oasis_minecart: ShortcutSandOasisMinecart
+    shortcut_minecart_before_caves: ShortcutMinecartBeforeCaves
+    shortcut_skyview_boards: ShortcutSkyviewBoards
+    shortcut_skyview_bars: ShortcutSkyviewBars
+    shortcut_earth_temple_bridge: ShortcutEarthTempleBridge
+    shortcut_lmf_wind_gates: ShortcutLmfWindGates
+    shortcut_lmf_boxes: ShortcutLmfBoxes
+    shortcut_lmf_bars_to_west_side: ShortcutLmfBarsToWestSide
+    shortcut_ac_bridge: ShortcutAcBridge
+    shortcut_ac_water_vents: ShortcutAcWaterVents
+    shortcut_sandship_windows: ShortcutSandshipWindows
+    shortcut_sandship_brig_bars: ShortcutSandshipBrigBars
+    shortcut_fs_outside_bars: ShortcutFsOutsideBars
+    shortcut_fs_lava_flow: ShortcutFsLavaFlow
+    shortcut_sky_keep_svt_room_bars: ShortcutSkyKeepSvtRoomBars
+    shortcut_sky_keep_fs_room_lower_bars: ShortcutSkyKeepFsRoomLowerBars
+    shortcut_sky_keep_fs_room_upper_bars: ShortcutSkyKeepFsRoomUpperBars
+    
+    # Quality of Life - Open Locations
+    open_lake_floria: OpenLakeFloriaGate
+    open_thunderhead: OpenThunderhead
+    open_earth_temple: OpenEarthTemple
+    open_lmf: OpenLmf
+    open_batreaux_shed: OpenBatraeuxShed
+    skip_skykeep_door_cutscene: SkipSkykeepDoorCutscene
+    skip_harp_playing: SkipHarpPlaying
+    skip_misc_cutscenes: SkipMiscCutscenes
+    
+    # Logic Tricks
+    logic_early_lake_floria: LogicEarlyLakeFloria
+    logic_beedles_island_cage_chest_dive: LogicBeedlesIslandCageChestDive
+    logic_volcanic_island_dive: LogicVolcanicIslandDive
+    logic_east_island_dive: LogicEastIslandDive
+    logic_advanced_lizalfos_combat: LogicAdvancedLizalfosCombat
+    logic_long_ranged_skyward_strikes: LogicLongRangedSkywardStrikes
+    logic_gravestone_jump: LogicGravestoneJump
+    logic_waterfall_cave_jump: LogicWaterfallCaveJump
+    logic_bird_nest_item_from_beedles_shop: LogicBirdNestItemFromBeedlesShop
+    logic_beedles_shop_with_bombs: LogicBeedlesShopWithBombs
+    logic_stuttersprint: LogicStutterSprint
+    logic_precise_beetle: LogicPreciseBeetle
+    logic_bomb_throws: LogicPreciseBombThrows
+    logic_faron_woods_with_groosenator: LogicFaronWoodsWithGroosenator
+    logic_itemless_first_timeshift_stone: LogicItemlessFirstTimeshift
+    logic_stamina_potion_through_sink_sand: LogicStaminaPotionThroughSinkSand
+    logic_brakeslide: LogicBrakeslide
+    logic_lanayru_mine_quick_bomb: LogicLanayruMineQuickBomb
+    logic_tot_skip_brakeslide: LogicTotSkipBrakeslide
+    logic_tot_slingshot: LogicTotSlingshot
+    logic_fire_node_without_hook_beetle: LogicFireNodeWithoutHookBeetle
+    logic_cactus_bomb_whip: LogicCactusBombWhip
+    logic_skippers_fast_clawshots: LogicSkippersRetreatFastClawshots
+    logic_skyview_spider_roll: LogicSkyviewSpiderRoll
+    logic_skyview_coiled_rupee_jump: LogicSkyviewCoiledRupeeJump
+    logic_skyview_precise_slingshot: LogicSkyviewPreciseSlingshot
+    logic_et_keese_skyward_strike: LogicEarthTempleKeeseSkywardStrike
+    logic_et_slope_stuttersprint: LogicEarthTempleSlopeStuttersprint
+    logic_et_bombless_scaldera: LogicEarthTempleBomblessScaldera
+    logic_lmf_whip_switch: LogicLmfWhipSwitch
+    logic_lmf_ceiling_precise_slingshot: LogicLmfCeilingPreciseSlingshot
+    logic_lmf_whip_armos_room_timeshift_stone: LogicLmfWhipTimeshiftStone
+    logic_lmf_minecart_jump: LogicLmfMinecartJump
+    logic_lmf_bellowsless_moldarach: LogicLmfBellowslessMoldarach
+    logic_ac_lever_jump_trick: LogicAcLeverJumpTrick
+    logic_ac_chest_after_whip_hooks_jump: LogicAcChestAfterWhipHooksJump
+    logic_sandship_jump_to_stern: LogicSandshipJumpToStern
+    logic_sandship_itemless_spume: LogicSandshipItemlessSpume
+    logic_sandship_no_combination_hint: LogicSandshipNoCombinationHint
+    logic_fs_pillar_jump: LogicFsPillarJump
+    logic_fs_practice_sword_ghirahim_2: LogicFsPracticeSwordGhirahim2
+    logic_present_bow_switches: LogicPresentBowSwitches
+    logic_skykeep_vineclip: LogicSkyKeepVineClip
+    
+    # Cosmetics
+    tunic_swap: TunicSwap
+    lightning_skyward_strike: LightnningSkywardStrike
+    starry_skies: StarrySky
+    remove_enemy_music: RemoveEnemyMusic
+    
+    # Extra Starting Inventory
+    starting_hearts: StartingHearts
+    start_with_all_bugs: StartWithAllBugs
+    start_with_all_treasures: StartWithAllTreasures
+    
+    # Original Starting Inventory
     starting_tablets: StartingTablets
     starting_sword: StartingSword
     random_starting_statues: RandomStartingStatues
@@ -830,16 +1480,6 @@ class SSHDOptions(PerGameCommonOptions):
     random_starting_item_count: RandomStartingItemCount
     peatrice_conversations: PeatriceConversations
     custom_starting_items: CustomStartingItems
-    
-    # Quality of Life
-    open_lake_floria_gate: OpenLakeFloriaGate
-    open_thunderhead: OpenThunderhead
-    open_earth_temple: OpenEarthTemple
-    open_lmf: OpenLmf
-    open_batreaux_shed: OpenBatraeuxShed
-    skip_skykeep_door_cutscene: SkipSkykeepDoorCutscene
-    skip_harp_playing: SkipHarpPlaying
-    skip_misc_cutscenes: SkipMiscCutscenes
     
     # Difficulty
     no_spoiler_log: NoSpoilerLog
