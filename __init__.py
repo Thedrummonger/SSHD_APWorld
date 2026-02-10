@@ -445,23 +445,12 @@ class SSHDWorld(World):
     
     def create_items(self) -> None:
         """Create all items for the world."""
-        # Lock Fledge locations to rupees so they can be safely skipped
-        fledge_skip_locations = {
-            "Knight Academy - Fledge's Gift",
-            "Knight Academy - Help Fledge Workout",
-        }
-        locked_locations = 0
-        for loc in self.multiworld.get_locations(self.player):
-            if loc.address is not None and loc.name in fledge_skip_locations:
-                loc.place_locked_item(self.create_item("Green Rupee"))
-                loc.progress_type = LocationProgressType.EXCLUDED
-                locked_locations += 1
         
-        # Count total locations (excluding events and locked locations)
+        # Count total locations (excluding events)
         total_locations = len([
             loc for loc in self.multiworld.get_locations(self.player)
             if loc.address is not None and not getattr(loc, "event", False)
-        ]) - locked_locations
+        ])
         
         # Get starting items from sshd-rando world (if available)
         # These items should NOT be added to the item pool since they're given at start
