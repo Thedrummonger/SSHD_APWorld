@@ -57,6 +57,8 @@ extern "C" {
     static mut TRAP_ID: u8;
     static mut NEXT_TRAP_ID: u8;
     static mut TRAP_DURATION: u16;
+    static mut NEXT_CUSTOM_FLAG: u16;
+    static mut NEXT_CUSTOM_FLAG_PENDING: u8;
 
     // Functions
     fn debugPrint_128(string: *const c_char, fstr: *const c_char, ...);
@@ -281,6 +283,13 @@ pub extern "C" fn fix_tbox_traps() {
             NEXT_TRAP_ID = trapid;
         }
 
+        // Read Archipelago custom_flag from TBox params2 bits 8-17 (10 bits)
+        // This gets propagated to the spawned item actor via ACTORBASE_PARAM2
+        // in spawned_actor_traps(), where unpack_custom_item_params will read it
+        let custom_flag = (((*tbox_actor).base.members.base.param2 >> 8) & 0x3FF) as u16;
+        NEXT_CUSTOM_FLAG = custom_flag;
+        NEXT_CUSTOM_FLAG_PENDING = 1;
+
         // Replaced instructions
         let max = u32::MAX;
         ITEM_GET_BOTTLE_POUCH_SLOT = max;
@@ -296,10 +305,24 @@ pub extern "C" fn spawned_actor_traps(
     actor_group_type: u8,
 ) {
     unsafe {
-        if actorid == actor::ACTORID::ITEM && NEXT_TRAP_ID != u8::MAX {
-            ACTORBASE_PARAM2 &= 0xFFFFFF0F;
-            ACTORBASE_PARAM2 |= (NEXT_TRAP_ID << 4) as u32;
-            NEXT_TRAP_ID = u8::MAX;
+        if actorid == actor::ACTORID::ITEM {
+            if NEXT_TRAP_ID != u8::MAX {
+                ACTORBASE_PARAM2 &= 0xFFFFFF0F;
+                ACTORBASE_PARAM2 |= (NEXT_TRAP_ID << 4) as u32;
+                NEXT_TRAP_ID = u8::MAX;
+            }
+
+            // Propagate Archipelago custom_flag to spawned item actor's param2 bits 8-17
+            // NEXT_CUSTOM_FLAG_PENDING is set by fix_tbox_traps when a chest is opened
+            // This guard prevents the zero-initialized NEXT_CUSTOM_FLAG from causing
+            // false flag writes on the first item spawn after game boot
+            if NEXT_CUSTOM_FLAG_PENDING != 0 {
+                if NEXT_CUSTOM_FLAG != 0x3FF {
+                    ACTORBASE_PARAM2 &= 0xFFFC00FF; // clear bits 8-17
+                    ACTORBASE_PARAM2 |= (NEXT_CUSTOM_FLAG as u32) << 8;
+                }
+                NEXT_CUSTOM_FLAG_PENDING = 0;
+            }
         }
 
         // Replaced instructions
@@ -317,6 +340,14 @@ pub extern "C" fn handle_closet_traps(item_id: u32) -> u32 {
 
         ACTORBASE_PARAM2 &= 0xFFFFFF0F;
         ACTORBASE_PARAM2 |= trapid << 4;
+
+        // Propagate Archipelago custom_flag from closet params2 bits 8-17 to
+        // ACTORBASE_PARAM2
+        let custom_flag = ((*closet_actor).members.base.param2 >> 8) & 0x3FF;
+        if custom_flag != 0x3FF {
+            ACTORBASE_PARAM2 &= 0xFFFC00FF; // clear bits 8-17
+            ACTORBASE_PARAM2 |= custom_flag << 8;
+        }
 
         return item_id;
     }

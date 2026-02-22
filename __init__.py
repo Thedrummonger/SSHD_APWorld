@@ -539,33 +539,19 @@ class SSHDWorld(World):
         
         slot_data["location_to_item_map"] = location_to_item_map
         
-        # Use the ACTUAL custom flag mapping extracted from sshd-rando patches
-        # This mapping was created during patch generation and stored in _actual_custom_flag_mapping
-        # We can't generate it beforehand because custom flags are assigned during patching
-        custom_flag_to_location_names = getattr(self, '_actual_custom_flag_mapping', {})
+        # Build custom flag mapping for ALL locations
+        # This happens during slot_data generation (before generate_output)
+        # so the client gets the mapping immediately on connect
+        # Cache it so we can reuse the same mapping when injecting into sshd-rando
+        print("[__init__.py] Building custom flag mapping for slot_data...")
+        self._custom_flag_mapping = self._build_custom_flag_mapping()
         
-        if not custom_flag_to_location_names:
-            print(f"[__init__.py] WARNING: No custom flag mapping found! Falling back to generated mapping")
-            # Fallback to generated mapping (returns location codes directly)
-            custom_flag_to_location_code = self._build_custom_flag_mapping()
-        else:
-            # Convert location names to location codes for the client
-            # The client expects custom_flag -> location_code (not location_name)
-            custom_flag_to_location_code = {}
-            for custom_flag_id, location_name in custom_flag_to_location_names.items():
-                try:
-                    location = self.multiworld.get_location(location_name, self.player)
-                    if location and location.address is not None:
-                        custom_flag_to_location_code[custom_flag_id] = location.address
-                except Exception as e:
-                    print(f"[__init__.py] Warning: Could not find location '{location_name}': {e}")
-        
-        slot_data["custom_flag_to_location"] = custom_flag_to_location_code
-        print(f"[__init__.py] Added {len(custom_flag_to_location_code)} custom flag -> location mappings to slot_data")
+        slot_data["custom_flag_to_location"] = self._custom_flag_mapping
+        print(f"[__init__.py] Added {len(self._custom_flag_mapping)} custom flag -> location mappings to slot_data")
         
         # Build reverse mapping: location -> custom_flag for item giving
         # This lets the client set custom flags to trigger vanilla item pickups
-        location_to_custom_flag = {loc_code: flag for flag, loc_code in custom_flag_to_location_code.items()}
+        location_to_custom_flag = {loc_code: flag for flag, loc_code in self._custom_flag_mapping.items()}
         slot_data["location_to_custom_flag"] = location_to_custom_flag
         
         return slot_data
@@ -787,6 +773,18 @@ class SSHDWorld(World):
             print(f"  Cross-world items: {overlay_results.get('cross_world_items', 0)}")
             print(f"  Unmapped locations: {overlay_results.get('unmapped_locations', 0)}")
             
+            # CRITICAL: Inject custom flags for ALL 911 locations BEFORE patches are applied
+            # This ensures sshd-rando patcher writes ALL custom flags into the game ROM
+            # Use the SAME mapping we built in fill_slot_data() to ensure ROM matches client
+            print("[__init__.py] Injecting custom flags for all Archipelago locations...")
+            if not hasattr(self, '_custom_flag_mapping'):
+                # Build the mapping if fill_slot_data() hasn't been called yet
+                self._custom_flag_mapping = self._build_custom_flag_mapping()
+            
+            from .SSHDRWrapper import inject_custom_flags_into_world
+            inject_custom_flags_into_world(world, self._custom_flag_mapping, self.multiworld, self.player)
+            print(f"[__init__.py] ✓ Injected {len(self._custom_flag_mapping)} custom flags")
+            
             # Apply patches with the overlaid items
             # This generates the romfs/exefs with Archipelago items in them
             print("[__init__.py] Applying patches with multiworld items...")
@@ -798,13 +796,23 @@ class SSHDWorld(World):
                 patch_handler.do_all_patches()
                 print("[__init__.py] ✓ Patches applied successfully")
                 
-                # AFTER patches are applied, extract the actual custom flag mapping
-                # This is critical - the custom flags are assigned during patch generation,
-                # so we can't know them until after patches are applied
+                # Extract the ACTUAL custom flag assignments from sshd-rando's world object
+                # These are the flags that were written into the game ROM by the patcher
                 print("[__init__.py] Extracting custom flag assignments from patched world...")
-                actual_custom_flag_mapping = extract_custom_flag_mapping(world)
-                self._actual_custom_flag_mapping = actual_custom_flag_mapping
-                print(f"[__init__.py] Stored {len(actual_custom_flag_mapping)} custom flag assignments for client")
+                sshd_custom_flag_names = extract_custom_flag_mapping(world)
+                
+                # Convert location names to location codes for the client
+                self._actual_custom_flag_mapping = {}
+                for custom_flag_id, location_name in sshd_custom_flag_names.items():
+                    try:
+                        location = self.multiworld.get_location(location_name, self.player)
+                        if location and location.address is not None:
+                            self._actual_custom_flag_mapping[custom_flag_id] = location.address
+                    except Exception as e:
+                        print(f"[__init__.py] Warning: Could not find location '{location_name}': {e}")
+                
+                print(f"[__init__.py] Stored {len(self._actual_custom_flag_mapping)} custom flag assignments for client")
+                print(f"[__init__.py] Note: Only locations with custom flags in sshd-rando will be monitored")
                 
                 # Verify files were created
                 exefs_out = actual_output_dir / "exefs"
@@ -1232,9 +1240,10 @@ class SSHDWorld(World):
         """
         Build a mapping from custom flag IDs to location codes.
         
-        This replicates sshd-rando's custom flag assignment logic.
-        Custom flags are assigned sequentially (in reverse order) to locations
-        with the "Custom Flag" type.
+        ALL locations need custom flags because any location could contain
+        an Archipelago item for another player's world.
+        
+        Custom flags are assigned sequentially (in reverse order) to all locations.
         
         Returns:
             Dict[int, int]: custom_flag_id -> location_code (Archipelago)
@@ -1248,27 +1257,24 @@ class SSHDWorld(World):
         
         custom_flag_to_location = {}
         
-        # Get all locations that use custom flags
-        custom_flag_locations = []
+        # Get ALL locations - every location needs a custom flag for Archipelago
+        all_locations = []
         for location in self.multiworld.get_locations(self.player):
             if location.address is not None and location.name in LOCATION_TABLE:
-                loc_data = LOCATION_TABLE[location.name]
-                # Check if this location has the "Custom Flag" type
-                # loc_data is a NamedTuple with a 'types' field containing a list
-                if "Custom Flag" in loc_data.types:
-                    custom_flag_locations.append(location)
+                all_locations.append(location)
         
         # Sort locations consistently (by location code) to ensure deterministic assignment
-        custom_flag_locations.sort(key=lambda loc: loc.address)
+        all_locations.sort(key=lambda loc: loc.address)
         
-        # Assign custom flags sequentially
-        for location in custom_flag_locations:
+        # Assign custom flags sequentially to ALL locations
+        for location in all_locations:
             if custom_flags:
                 custom_flag_id = custom_flags.pop()
                 custom_flag_to_location[custom_flag_id] = location.address
-                print(f"[__init__.py] Assigned custom flag {custom_flag_id} to location {location.name} ({location.address})")
+            else:
+                print(f"[__init__.py] ERROR: Ran out of custom flags! Location {location.name} could not be assigned.")
         
-        print(f"[__init__.py] Built custom flag mapping with {len(custom_flag_to_location)} flags")
+        print(f"[__init__.py] Built custom flag mapping with {len(custom_flag_to_location)} flags for {len(all_locations)} locations")
         return custom_flag_to_location
 
     

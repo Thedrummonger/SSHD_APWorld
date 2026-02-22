@@ -624,6 +624,53 @@ def extract_location_item_mapping(world: Any) -> Dict[str, str]:
     return location_item_map
 
 
+def inject_custom_flags_into_world(world: Any, custom_flag_mapping: Dict[int, int], 
+                                   multiworld, player: int) -> None:
+    """
+    Inject custom flag assignments for ALL Archipelago locations into the sshd-rando world.
+    
+    This must be called BEFORE patches are applied so that the patcher writes
+    ALL custom flags into the game ROM (not just the 472 it knows about).
+    
+    Args:
+        world: sshd-rando World object (before patches)
+        custom_flag_mapping: Dict[custom_flag_id, location_code] from _build_custom_flag_mapping()
+        multiworld: Archipelago multiworld object
+        player: Player number
+    """
+    if not hasattr(world, 'location_table'):
+        print("[SSHDRWrapper] ERROR: World has no location_table - cannot inject custom flags!")
+        return
+    
+    # Build reverse lookup: location_code -> custom_flag_id
+    location_code_to_flag = {loc_code: flag_id for flag_id, loc_code in custom_flag_mapping.items()}
+    
+    injected_count = 0
+    for location_name, location_obj in world.location_table.items():
+        # Look up this location in Archipelago to get its location code
+        try:
+            ap_location = multiworld.get_location(location_name, player)
+            if ap_location and ap_location.address is not None:
+                location_code = ap_location.address
+                
+                # Check if we have a custom flag assignment for this location
+                if location_code in location_code_to_flag:
+                    custom_flag_id = location_code_to_flag[location_code]
+                    
+                    # Inject the custom flag into the sshd-rando location object
+                    # The patcher will see this and write it into the ROM
+                    location_obj.custom_flag = custom_flag_id
+                    injected_count += 1
+                    
+                    if injected_count <= 10:  # Log first few for verification
+                        print(f"[SSHDRWrapper]   {location_name}: custom_flag={custom_flag_id}")
+        except Exception as e:
+            # Some locations might not exist in Archipelago (vanilla-only)
+            pass
+    
+    print(f"[SSHDRWrapper] Injected custom flags into {injected_count} locations")
+
+
 def extract_custom_flag_mapping(world: Any) -> Dict[int, str]:
     """
     Extract the custom_flag → location_name mapping from the generated world.

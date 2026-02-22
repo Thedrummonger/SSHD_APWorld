@@ -171,9 +171,12 @@ class EventPatchHandler:
                                     self.entry_add(msbf=parsed_msbf, entry_add=patch)
 
                         if msbf_file_name[:-5] in self.check_patches:
-                            for eventid, itemid, trapid in self.check_patches[
+                            print(f"[EventPatch] Found {len(self.check_patches[msbf_file_name[:-5]])} check patches for {msbf_file_name}")
+                            for eventid, itemid, trapid, custom_flag in self.check_patches[
                                 msbf_file_name[:-5]
                             ]:
+                                print(f"[EventPatch] Processing event in {msbf_file_name}: eventid={eventid}, itemid={itemid}, custom_flag={custom_flag:#x}")
+                                
                                 if not eventid.isnumeric():
                                     index = self.flow_label_to_index_mapping.get(
                                         eventid, None
@@ -200,8 +203,40 @@ class EventPatchHandler:
 
                                 parsed_msbf["FLW3"]["flow"][eventid]["param2"] = itemid
 
-                                # Give item command == 9
-                                parsed_msbf["FLW3"]["flow"][eventid]["param3"] = 9
+                                # Inject set_global_sceneflag flow node after giveitem (for Archipelago multiworld detection)
+                                # Uses CUSTOM event command 80 (subType=0, param3=80) which calls
+                                # flag::set_global_sceneflag() in Rust to write directly to FA.sceneflags[]
+                                # The vanilla setsceneflag command (param3=2) only sets LOCAL scene flags
+                                # which don't work for arbitrary scenes 6/13/16/19
+                                if custom_flag != 0x3FF:
+                                    CUSTOM_FLAG_SCENES = [6, 13, 16, 19]
+                                    scene_selector = (custom_flag >> 7) & 0x3
+                                    actual_scene_index = CUSTOM_FLAG_SCENES[scene_selector]
+                                    flag_index = custom_flag & 0x7F
+                                    
+                                    # Get where the giveitem was going to chain to
+                                    original_next_index = parsed_msbf["FLW3"]["flow"][eventid].get("next", -1)
+                                    
+                                    # Create flow node using custom event command 80 (set_global_sceneflag)
+                                    # subType=0 routes through the custom event command handler in event.rs
+                                    # param3=80 dispatches to our set_global_sceneflag command
+                                    setflag_flow = {
+                                        "type": "type3",
+                                        "subType": 0,
+                                        "param1": flag_index,          # flag index (0-127)
+                                        "param2": actual_scene_index,  # actual scene index (6, 13, 16, or 19)
+                                        "param3": 80,                  # custom command: set_global_sceneflag
+                                        "param4": 0,
+                                        "param5": 0,
+                                        "next": original_next_index,
+                                    }
+                                    
+                                    # Append new flow node and redirect giveitem to it
+                                    new_flow_index = len(parsed_msbf["FLW3"]["flow"])
+                                    parsed_msbf["FLW3"]["flow"].append(setflag_flow)
+                                    parsed_msbf["FLW3"]["flow"][eventid]["next"] = new_flow_index
+                                    
+                                    print(f"[EventPatch] Injected set_global_sceneflag(cmd80) for event {eventid}: scene={actual_scene_index}, flag={flag_index} (flow {new_flow_index} -> {original_next_index})")
 
                         if msbf_file_name == "003-ItemGet.msbf":
                             handle_progressive_items(parsed_msbf)
@@ -414,8 +449,8 @@ class EventPatchHandler:
 
         msbt["ATR1"][text_patch["index"]] = current_text_atr1_data
 
-    def add_check_patch(self, event_file: str, eventid: str, itemid: int, trapid: int):
-        self.check_patches[event_file].append((eventid, itemid, trapid))
+    def add_check_patch(self, event_file: str, eventid: str, itemid: int, trapid: int, custom_flag: int):
+        self.check_patches[event_file].append((eventid, itemid, trapid, custom_flag))
 
 
 def make_progressive_item_events(

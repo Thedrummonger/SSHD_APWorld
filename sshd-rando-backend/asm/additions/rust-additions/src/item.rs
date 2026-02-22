@@ -120,6 +120,7 @@ extern "C" {
     static EQUIPPED_SWORD: u8;
     static mut ITEM_GET_BOTTLE_POUCH_SLOT: u32;
     static mut NUMBER_OF_ITEMS: u32;
+    static mut ACTORBASE_PARAM2: u32;
 
     static mut SQUIRRELS_CAUGHT_THIS_PLAY_SESSION: bool;
     static TADTONE_SCENEFLAGS: [u8; 17];
@@ -186,6 +187,82 @@ pub extern "C" fn give_item_with_sceneflag(itemid: u8, sceneflag: u8) -> *mut dA
 
         if item_actor.is_null() {
             return item_actor;
+        }
+
+        ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
+        NUMBER_OF_ITEMS = 0;
+
+        return item_actor;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn give_item_with_archipelago_flag(itemid: u8, custom_flag: u16) -> *mut dAcItem {
+    unsafe {
+        NUMBER_OF_ITEMS = 0;
+        ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
+
+        let new_itemid = dAcItem__determineFinalItemid(itemid as u64);
+
+        // Decode custom_flag from eventpatchhandler.py encoding:
+        // Bits 0-6: flag (0-127)
+        // Bits 7-8: scene selector (0-3)
+        // Bit 9: flag_space (0=sceneflag, 1=dungeonflag)
+        let flag = (custom_flag & 0x7F) as u32;
+        let scene_selector = ((custom_flag >> 7) & 0x3) as u32;
+        let flag_space = ((custom_flag >> 9) & 0x1) as u32;
+
+        // Re-encode into param2 format expected by unpack_custom_item_params:
+        // Bits 8-14: flag (7 bits)
+        // Bits 15-16: scene selector (2 bits)
+        // Bit 17: flag_space_trigger (1 bit)
+        // Bits 18-23: original_itemid (6 bits, encoded stamina fruit/rupee type)
+        // Bits 0-7: unused for custom flags
+
+        // Map itemid to original_itemid encoding (reverse of
+        // unpack_custom_item_params)
+        let original_itemid: u32 = match new_itemid {
+            42 => 1, // Stamina Fruit
+            2 => 2,  // Green Rupee
+            3 => 3,  // Blue Rupee
+            4 => 4,  // Red Rupee
+            34 => 5, // Rupoor
+            _ => 0,  // Other items don't use original_itemid encoding
+        };
+
+        let param2: u32 =
+            (flag << 8) | (scene_selector << 15) | (flag_space << 17) | (original_itemid << 18);
+
+        // Spawn item with param1 for display, param2 for custom flag
+        let param1: u32 = (new_itemid as u32) | 0x180000; // Standard item spawn flags
+
+        // Set ACTORBASE_PARAM2 BEFORE spawning so it gets picked up by actor init
+        // This is critical - param2 must be set before dAcItem::Init runs
+        ACTORBASE_PARAM2 = param2;
+
+        let item_actor: *mut dAcItem = actor::spawn_actor(
+            actor::ACTORID::ITEM,
+            (*ROOM_MGR).roomid.into(),
+            param1,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            0xFFFFFFFF,
+        ) as *mut dAcItem;
+
+        // Reset ACTORBASE_PARAM2 to prevent it affecting subsequent spawns
+        ACTORBASE_PARAM2 = 0xFFFFFFFF;
+
+        if item_actor.is_null() {
+            ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
+            NUMBER_OF_ITEMS = 0;
+            return item_actor;
+        }
+
+        // Verify param2 was actually set - if not, set it manually
+        // This handles cases where ACTORBASE_PARAM2 mechanism didn't work
+        if (*item_actor).base.members.base.param2 != param2 {
+            (*item_actor).base.members.base.param2 = param2;
         }
 
         ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
@@ -1340,7 +1417,18 @@ pub extern "C" fn get_arc_model_from_item(
     item_id: u16,
 ) -> *mut c_void {
     unsafe {
+        // Safety check: If arc_name is null (item has no model defined),
+        // return null to prevent crash. This happens with bugs/materials.
+        if arc_name.is_null() {
+            return core::ptr::null_mut();
+        }
+
         let resolved_model_name = resolve_progressive_item_models(arc_name, item_id, 1);
+
+        // Additional safety check after resolution
+        if resolved_model_name.is_null() {
+            return core::ptr::null_mut();
+        }
 
         return dRawArcTable_c__getDataFromOarc(
             arc_table,
@@ -1356,6 +1444,15 @@ pub extern "C" fn get_item_model_name_ptr(
     item_id: u16,
 ) -> *const c_char {
     unsafe {
+        // Safety check: If model_name is null (item has no model defined),
+        // return null to prevent crash. This happens with bugs/materials.
+        if model_name.is_null() {
+            // Replaced code still needs to execute
+            asm!("mov x1, {0:x}", in(reg) item_id);
+            asm!("cmp x1, #0x1C");
+            return core::ptr::null();
+        }
+
         let resolved_model_name = resolve_progressive_item_models(model_name, item_id, 2);
 
         // Replaced code

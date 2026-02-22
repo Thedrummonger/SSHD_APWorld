@@ -173,6 +173,20 @@ pub extern "C" fn custom_event_commands(
             (*(*LYT_MSG_WINDOW).text_mgr).numeric_args[1] =
                 1 + (((*FILE_MGR).FA.dungeonflags[sceneindex as usize][1] >> 4) & 0xF) as u32;
         },
+        // Give item with custom sceneflag (for Archipelago)
+        79 => unsafe {
+            use crate::item::give_item_with_sceneflag;
+            let itemid = (event_flow_element.param2 & 0xFF) as u8;
+            let custom_flag = event_flow_element.param4 as u8;
+            give_item_with_sceneflag(itemid, custom_flag);
+        },
+        // Set global sceneflag for Archipelago custom flag detection
+        // param1 = flag index (0-127), param2 = actual scene index (6, 13, 16, or 19)
+        80 => {
+            let flag_index = event_flow_element.param1 as u16;
+            let scene_index = event_flow_element.param2 as u16;
+            flag::set_global_sceneflag(scene_index, flag_index);
+        },
         _ => (),
     }
 

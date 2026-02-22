@@ -40,3 +40,9 @@ ITEM_MEMORY_ADDRESSES.py
 ITEM_MEMORY_MAP.py
 check_config.py
 decode_setting_string.py
+build_sshd_ap.bat
+find_hook_point.py
+scan_for_flags.py
+
+# Rando stuff
+Skyward Sword HD Randomizer/

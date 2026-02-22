@@ -54,7 +54,8 @@ args = get_program_args()
 
 
 def patch_tbox(
-    bzs: dict, itemid: int, object_id_str: str, trapid: int, tbox_subtype: int
+    bzs: dict, itemid: int, object_id_str: str, trapid: int, tbox_subtype: int,
+    custom_flag: int = 0x3FF,
 ):
     id = int(object_id_str)
     tbox: dict | None = next(
@@ -73,6 +74,13 @@ def patch_tbox(
     else:
         # Makes sure the bit is set if not a trap
         tbox["params2"] = mask_shift_set(tbox["params2"], 0xF, 28, 0xF)
+
+    # Encode Archipelago custom_flag into params2 bits 8-17 (10 bits)
+    # This gets read by fix_tbox_traps in Rust and propagated to the spawned
+    # item actor via ACTORBASE_PARAM2, where unpack_custom_item_params will
+    # extract it and call set_global_sceneflag for Archipelago detection.
+    # 0x3FF = no custom flag (flag bits = 0x7F = skip sentinel in Rust)
+    tbox["params2"] = mask_shift_set(tbox["params2"], 0x3FF, 8, custom_flag)
 
     original_itemid = tbox["anglez"] & 0x1FF
 
@@ -227,7 +235,8 @@ def patch_bucha(bzs: dict, itemid: int, object_id_str: str, trapid: int):
 
 
 def patch_closet(
-    bzs: dict, itemid: int, object_id_str: str, trapid: int, room: int, stage: str
+    bzs: dict, itemid: int, object_id_str: str, trapid: int, room: int, stage: str,
+    custom_flag: int = 0x3FF,
 ):
     id = int(object_id_str, 16)
     closet: dict | None = next(
@@ -246,6 +255,12 @@ def patch_closet(
     else:
         # Makes sure the bit is set if not a trap
         closet["params2"] = mask_shift_set(closet["params2"], 0xF, 4, 0xF)
+
+    # Encode Archipelago custom_flag into params2 bits 8-17 (10 bits)
+    # This gets read by handle_closet_traps in Rust and propagated to the
+    # spawned item actor via ACTORBASE_PARAM2, where unpack_custom_item_params
+    # will extract it and call set_global_sceneflag for Archipelago detection.
+    closet["params2"] = mask_shift_set(closet["params2"], 0x3FF, 8, custom_flag)
 
     # Mapping of each closet (scene, roomid, objectid) to the local scene flag we'll use
     unused_scene_flags: dict[tuple[str, int, int], int] = {
@@ -989,6 +1004,7 @@ class StagePatchHandler:
                             objectid,
                             trapid,
                             tbox_subtype,
+                            custom_flag,
                         )
                     elif object_name == "Item":
                         patch_freestanding_item(
@@ -1021,6 +1037,7 @@ class StagePatchHandler:
                             trapid,
                             room,
                             stage_name,
+                            custom_flag,
                         )
                     elif object_name == "EBc":
                         patch_ac_key_boko(

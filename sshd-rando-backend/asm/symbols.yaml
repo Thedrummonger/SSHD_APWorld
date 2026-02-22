@@ -263,6 +263,11 @@ main:
     BOSS_RUSH_CURRENT_SCENEINDEX: 0x712e5ff078
     BOSS_RUSH_STORYFLAG_STATES: 0x712e5ff07a
 
+    ## Size: 2 (u16) - Archipelago custom flag for chest/closet items
+    NEXT_CUSTOM_FLAG: 0x712e5ff07c
+    ## Size: 1 (u8) - Whether NEXT_CUSTOM_FLAG was set by fix_tbox_traps (0=no, 1=yes)
+    NEXT_CUSTOM_FLAG_PENDING: 0x712e5ff07e
+
     ## Size: 0x80 (128) each
     DEBUG_PRINTABLE_STRING: 0x712e601000
     DEBUG_PRINTABLE_STRING_ARG: 0x712e601040

@@ -94,6 +94,18 @@ except ImportError as e:
         FLAG_SCENE = "SCENE"
         FLAG_SPECIAL = "SPECIAL"
 
+# Import tracker bridge
+try:
+    from .TrackerBridge import TrackerBridge
+    print(f"[Import] Successfully imported TrackerBridge from package")
+except ImportError:
+    try:
+        from TrackerBridge import TrackerBridge
+        print(f"[Import] Successfully imported TrackerBridge from standalone")
+    except ImportError as e:
+        print(f"[Import] TrackerBridge not available: {e}")
+        TrackerBridge = None
+
 # Import location table for proper location IDs
 try:
     from .Locations import LOCATION_TABLE
@@ -367,13 +379,93 @@ class RyujinxMemoryReader:
             traceback.print_exc()
             return False
     
+    def _validate_base_address(self, candidate_base: int) -> int:
+        """Validate a candidate base address by checking known offsets.
+        
+        Returns:
+            Score indicating how many validation tests passed (higher is better)
+        """
+        score = 0
+        
+        try:
+            # Test 1: Check if the signature itself is valid (already confirmed, but verify)
+            sig_data = self.pm.read_bytes(candidate_base, len(MEMORY_SIGNATURE))
+            if sig_data == MEMORY_SIGNATURE:
+                score += 1
+            else:
+                return 0  # Invalid signature, immediate fail
+            
+            # Test 2: Check for reasonable pointer values at key offsets
+            # Pointers should be in user-space range (not null, not kernel space)
+            player_ptr = self.pm.read_bytes(candidate_base + OFFSET_PLAYER, 8)
+            if player_ptr:
+                ptr_val = struct.unpack('<Q', player_ptr)[0]
+                if 0x1000 < ptr_val < 0x7FFFFFFFFFFF:
+                    score += 1
+            
+            # Test 3: Check file manager pointer
+            filemgr_ptr = self.pm.read_bytes(candidate_base + OFFSET_FILE_MANAGER, 8)
+            if filemgr_ptr:
+                ptr_val = struct.unpack('<Q', filemgr_ptr)[0]
+                if 0x1000 < ptr_val < 0x7FFFFFFFFFFF:
+                    score += 1
+            
+            # Test 4: Check current stage pointer
+            stage_ptr = self.pm.read_bytes(candidate_base + OFFSET_CURRENT_STAGE, 8)
+            if stage_ptr:
+                ptr_val = struct.unpack('<Q', stage_ptr)[0]
+                if 0x1000 < ptr_val < 0x7FFFFFFFFFFF:
+                    score += 1
+                    
+            # Test 5: Check story flags region - should be readable memory
+            try:
+                story_flags = self.pm.read_bytes(candidate_base + OFFSET_STORY_FLAGS_STATIC, 16)
+                if story_flags and len(story_flags) == 16:
+                    score += 1
+            except:
+                pass
+            
+            # Test 6: Check scene flags region - should be readable
+            try:
+                scene_flags = self.pm.read_bytes(candidate_base + OFFSET_SCENE_FLAGS_STATIC, 16)
+                if scene_flags and len(scene_flags) == 16:
+                    score += 1
+            except:
+                pass
+                
+            # Test 7: Check if save file pointer is in reasonable range
+            try:
+                savefile_data = self.pm.read_bytes(candidate_base + OFFSET_SAVEFILE_A, 4)
+                if savefile_data:
+                    score += 1
+            except:
+                pass
+            
+            # Test 8: Verify the MOD signature is followed by expected data pattern
+            # The signature includes "MOD0" at offset 8, check what comes after
+            try:
+                post_sig = self.pm.read_bytes(candidate_base + 16, 16)
+                if post_sig and len(post_sig) == 16:
+                    score += 1
+            except:
+                pass
+                
+        except Exception as e:
+            logger.debug(f"Validation error for base 0x{candidate_base:X}: {e}")
+            return score
+        
+        return score
+    
     def _scan_memory_sync(self) -> bool:
-        """Synchronous memory scanning using VirtualQueryEx for precise region enumeration."""
+        """Synchronous memory scanning using VirtualQueryEx for precise region enumeration.
+        
+        Now finds ALL signatures and validates each one to pick the best candidate.
+        """
         try:
             import ctypes
             
             start_time = time.time()
-            print(f"[DEBUG] Starting VirtualQueryEx-based memory scan")
+            print(f"[DEBUG] Starting VirtualQueryEx-based memory scan for all signatures")
             
             # Windows memory constants
             MEM_COMMIT = 0x1000
@@ -403,6 +495,9 @@ class RyujinxMemoryReader:
             chunks_scanned = 0
             regions_scanned = 0
             mbi = MEMORY_BASIC_INFORMATION()
+            
+            # Collect ALL candidate addresses
+            candidates = []
 
             while address < max_address:
                 # Query exact boundaries and attributes of the region at 'address'
@@ -443,19 +538,21 @@ class RyujinxMemoryReader:
                             if chunks_scanned % 10 == 0:
                                 print(f"[DEBUG] Scanned {chunks_scanned} chunks, address: 0x{scan_pos:X}")
 
-                            sig_offset = data.find(MEMORY_SIGNATURE)
-                            if sig_offset != -1:
+                            # Find ALL occurrences in this chunk
+                            search_offset = 0
+                            while True:
+                                sig_offset = data.find(MEMORY_SIGNATURE, search_offset)
+                                if sig_offset == -1:
+                                    break
+                                    
                                 signature_address = scan_pos + sig_offset
-                                # Base address IS where the signature starts
-                                # (matches Lua: baseAddress = foundList.Address[0])
                                 potential_base = signature_address
-                                elapsed = time.time() - start_time
-                                print(f"[SUCCESS] Found SSHD base address: 0x{potential_base:X}")
-                                print(f"[INFO] Signature at 0x{signature_address:X}, region protect={mbi.Protect:#x} type={mbi.Type:#x}")
-                                print(f"[SCAN] Took {elapsed:.1f}s, {chunks_scanned} chunks in {regions_scanned} regions")
-                                self.base_address = potential_base
-                                logger.info(f"Found SSHD base address (took {elapsed:.1f}s)")
-                                return True
+                                candidates.append(potential_base)
+                                print(f"[FOUND] Signature #{len(candidates)} at 0x{potential_base:X}")
+                                
+                                # Continue searching after this match
+                                search_offset = sig_offset + 1
+                                
                         except Exception:
                             pass  # skip unreadable sub-chunks within this region
 
@@ -464,9 +561,36 @@ class RyujinxMemoryReader:
                 # Advance precisely to next region — no large arbitrary jumps
                 address = region_base + region_size
 
-            print(f"[FAIL] Signature not found after {chunks_scanned} chunks in {regions_scanned} regions")
-            logger.error("Could not find SSHD signature in memory")
-            return False
+            elapsed = time.time() - start_time
+            print(f"[SCAN] Took {elapsed:.1f}s, {chunks_scanned} chunks in {regions_scanned} regions")
+            print(f"[FOUND] {len(candidates)} signature(s) found")
+            
+            if len(candidates) == 0:
+                print(f"[FAIL] No signatures found")
+                logger.error("Could not find SSHD signature in memory")
+                return False
+            
+            # Validate all candidates
+            print(f"[VALIDATE] Testing {len(candidates)} candidate(s)...")
+            scored_candidates = []
+            for candidate in candidates:
+                score = self._validate_base_address(candidate)
+                scored_candidates.append((candidate, score))
+                print(f"[VALIDATE] 0x{candidate:X} - Score: {score}/8")
+            
+            # Sort by score (highest first)
+            scored_candidates.sort(key=lambda x: x[1], reverse=True)
+            
+            # Pick the best one
+            best_base, best_score = scored_candidates[0]
+            print(f"[SUCCESS] Selected base address: 0x{best_base:X} (score: {best_score}/8)")
+            
+            if best_score < 3:
+                logger.warning(f"Base address has low validation score ({best_score}/8) - may be incorrect")
+            
+            self.base_address = best_base
+            logger.info(f"Found SSHD base address: 0x{best_base:X} (score: {best_score}/8, took {elapsed:.1f}s)")
+            return True
 
         except Exception as e:
             print(f"[ERROR] Exception during scan: {e}")
@@ -694,6 +818,11 @@ class SSHDContext(CommonContext):
         self.custom_flag_to_location: Dict[int, int] = {}  # custom_flag_id -> location_code
         self.location_to_custom_flag: Dict[int, int] = {}  # location_code -> custom_flag_id (for vanilla pickups)
         
+        # Tracker bridge for autotracking
+        self.tracker_bridge = TrackerBridge() if TrackerBridge else None
+        if self.tracker_bridge:
+            logger.info(f"Tracker bridge initialized: {self.tracker_bridge.get_state_file_path()}")
+        
     async def server_auth(self, password_requested: bool = False):
         """Authenticate with the Archipelago server."""
         if password_requested and not self.password:
@@ -741,6 +870,39 @@ class SSHDContext(CommonContext):
                 json.dump(existing, f)
         except Exception as e:
             logger.debug(f"[Progress] Could not save progress: {e}")
+
+    def update_tracker_state(self):
+        """Update the tracker bridge with current state for autotracking."""
+        if not self.tracker_bridge:
+            return
+        
+        # Build received items dictionary
+        received_items = dict(self.progressive_counts)
+        
+        # Add items from queue (not yet delivered)
+        for item in self.item_queue:
+            item_name = item.get("name", "Unknown Item")
+            received_items[item_name] = received_items.get(item_name, 0) + 1
+        
+        # Create location name mapping
+        location_names = {}
+        for loc_id in self.checked_locations:
+            try:
+                loc_name = self.location_names.lookup_in_slot(loc_id, self.slot)
+                location_names[loc_id] = loc_name
+            except:
+                location_names[loc_id] = f"Location_{loc_id}"
+        
+        # Update tracker
+        self.tracker_bridge.update_tracker_state(
+            checked_locations=self.checked_locations,
+            received_items=received_items,
+            slot_name=self.auth or "Unknown",
+            seed_name=self.slot_data.get("seed_name", None),
+            location_names=location_names,
+            item_names=None,  # Could add if needed
+            slot_data=self.slot_data,
+        )
 
     
     def on_package(self, cmd: str, args: dict):
@@ -812,6 +974,10 @@ class SSHDContext(CommonContext):
 
             # Load persisted delivery count so we don't re-give items on reconnect
             self.load_progress()
+            
+            # Initialize tracker state file on connection
+            logger.info("Creating initial tracker state file")
+            self.update_tracker_state()
             
         elif cmd == "ReceivedItems":
             # Received items from other players
@@ -1090,6 +1256,9 @@ class SSHDContext(CommonContext):
                     self.item_queue.pop(0)
                     self.delivered_item_count += 1
                     self.save_progress()
+                    
+                    # Update tracker with new item
+                    self.update_tracker_state()
             
             # Check for death (for death link)
             current_health = self.memory.read_short(OFFSET_CURRENT_HEALTH)
@@ -1154,14 +1323,17 @@ class SSHDContext(CommonContext):
         # The mapping from flag ID to location code is provided in slot_data
         
         # Flags are stored as [[u16; 8]; 26] - 26 scenes, each with 8 u16 values (16 bytes per scene)
-        # But we only use 4 specific scenes for custom flags
+        # We use 4 specific scenes for custom flags (scenes 6, 13, 16, 19)
         
-        # Debug: Log every 100 polls to confirm function is running
+        # OPTIMIZATION: Batch-read entire scenes instead of individual flags
+        # This reduces 911 individual memory reads to just 8 batch reads (4 scenes × 2 flag types)
+        
         if not hasattr(self, '_flag_check_count'):
             self._flag_check_count = 0
-            self._successful_reads = 0
-            self._failed_reads = 0
         self._flag_check_count += 1
+        
+        # Cache for scene data to avoid re-reading the same scene multiple times
+        scene_cache = {}
         
         for flag_id, location_code in self.custom_flag_to_location.items():
             # Skip if already checked
@@ -1194,92 +1366,117 @@ class SSHDContext(CommonContext):
                 logger.error(f"Invalid flag {flag_id}: upper_flag={upper_flag} exceeds array bounds (max 7)")
                 continue
             
-            flag_offset = None  # Initialize for error handling
             try:
-                # Calculate memory address for this specific flag
-                # Read from SaveFile structure where the Rust code actually sets the flags
-                # Rust code: (*FILE_MGR).FA.sceneflags[sceneindex][upper_flag] |= 1 << lower_flag;
-                file_a_offset = OFFSET_SAVEFILE_A
+                # OPTIMIZATION: Use cached scene data if available
+                scene_key = (flag_space_trigger, sceneindex)
                 
-                # DEBUG: Log addresses on first custom flag check
-                if not hasattr(self, '_logged_addresses'):
-                    logger.debug(f"[DEBUG] Base address: 0x{self.memory.base_address:X}")
-                    logger.debug(f"[DEBUG] SaveFile FA offset: 0x{file_a_offset:X}")
-                    logger.debug(f"[DEBUG] Sceneflags offset within FA: 0x{OFFSET_FA_SCENEFLAGS:X}")
-                    logger.debug(f"[DEBUG] Dungeonflags offset within FA: 0x{OFFSET_FA_DUNGEONFLAGS:X}")
-                    self._logged_addresses = True
+                if scene_key not in scene_cache:
+                    # Batch-read the entire scene (16 bytes = 8 u16 values)
+                    file_a_offset = OFFSET_SAVEFILE_A
+                    
+                    # DEBUG: Log addresses on first custom flag check
+                    if not hasattr(self, '_logged_addresses'):
+                        logger.debug(f"[DEBUG] Base address: 0x{self.memory.base_address:X}")
+                        logger.debug(f"[DEBUG] SaveFile FA offset: 0x{file_a_offset:X}")
+                        logger.debug(f"[DEBUG] Sceneflags offset within FA: 0x{OFFSET_FA_SCENEFLAGS:X}")
+                        logger.debug(f"[DEBUG] Dungeonflags offset within FA: 0x{OFFSET_FA_DUNGEONFLAGS:X}")
+                        logger.info(f"[Optimization] Batch-reading flag scenes for {len(self.custom_flag_to_location)} locations")
+                        logger.info(f"[FlagInit] Initializing previous_custom_flags to prevent false positives...")
+                        self._logged_addresses = True
+                        # Initialize previous_custom_flags on first poll to prevent treating
+                        # already-set flags as new location checks
+                        self._initializing_flags = True
+                    
+                    # Calculate base offset for this flag type
+                    if flag_space_trigger == 0:
+                        flags_base_offset = file_a_offset + OFFSET_FA_SCENEFLAGS
+                    else:
+                        flags_base_offset = file_a_offset + OFFSET_FA_DUNGEONFLAGS
+                    
+                    # Calculate scene base offset
+                    scene_offset = flags_base_offset + (sceneindex * 16)
+                    
+                    # Batch-read all 16 bytes (8 u16 values) for this scene at once
+                    scene_data = self.memory.read_bytes(scene_offset, 16)
+                    
+                    if scene_data and len(scene_data) == 16:
+                        # Parse into 8 u16 values (little-endian)
+                        scene_u16s = [
+                            int.from_bytes(scene_data[i:i+2], byteorder='little')
+                            for i in range(0, 16, 2)
+                        ]
+                        scene_cache[scene_key] = scene_u16s
+                    else:
+                        scene_cache[scene_key] = None
                 
-                # Calculate flags offset within SaveFile structure
-                if flag_space_trigger == 0:
-                    # Scene flags in save file (where Rust code writes)
-                    flags_base_offset = file_a_offset + OFFSET_FA_SCENEFLAGS
-                else:
-                    # Dungeon flags in save file (where Rust code writes)
-                    flags_base_offset = file_a_offset + OFFSET_FA_DUNGEONFLAGS
-                
-                # Calculate offset within the 26-scene array
-                # Each scene has 16 bytes (8 u16 values)
-                flag_offset = flags_base_offset + (sceneindex * 16) + (upper_flag * 2)
-                
-                # DEBUG: Log first few flag addresses
-                if not hasattr(self, '_logged_flag_calcs'):
-                    self._logged_flag_calcs = []
-                if len(self._logged_flag_calcs) < 3:
-                    logger.debug(f"[DEBUG] Flag {flag_id}: scene={sceneindex}, upper={upper_flag}, lower={lower_flag}")
-                    logger.debug(f"[DEBUG]   flags_base_offset=0x{flags_base_offset:X}, final offset=0x{flag_offset:X}")
-                    self._logged_flag_calcs.append(flag_id)
-                
-                current_u16 = self.memory.read_short(flag_offset)
-                
-                if current_u16 is not None:
-                    self._successful_reads += 1
+                # Get the u16 value from cache
+                scene_u16s = scene_cache.get(scene_key)
+                if scene_u16s is not None and upper_flag < len(scene_u16s):
+                    current_u16 = scene_u16s[upper_flag]
                     # Check if the specific bit is set
                     flag_state = (current_u16 >> lower_flag) & 0x1
                     previous_state = self.previous_custom_flags.get(flag_id, 0)
                     
-                    # DEBUG: Log first few flag values to see what we're reading
-                    # Log every 50 polls to watch for changes
-                    if len(self._logged_flag_calcs) < 3 and flag_id in self._logged_flag_calcs and self._flag_check_count % 50 == 0:
+                    # Debug logging for first few flags to verify state tracking
+                    if not hasattr(self, '_debug_log_count'):
+                        self._debug_log_count = 0
+                    if flag_state == 1 and self._debug_log_count < 5:
                         location_name = self.location_names.lookup_in_slot(location_code, self.slot)
-                        logger.debug(f"[FlagValue] flag_id={flag_id}, u16=0x{current_u16:04X}, bit={lower_flag}, "
-                                  f"state={flag_state}, prev={previous_state}, loc={location_name}")
+                        logger.debug(f"[StateDebug] {location_name}: flag_state={flag_state}, previous_state={previous_state}, flag_id={flag_id}")
+                        self._debug_log_count += 1
                     
-                    # LOG ALL SET FLAGS (only when the specific bit is 1, not just when u16 is non-zero)
-                    if flag_state == 1:
-                        location_name = self.location_names.lookup_in_slot(location_code, self.slot)
-                        absolute_address = self.memory.base_address + flag_offset
-                        logger.debug(f"[FlagValue] SET! flag_id={flag_id}, u16=0x{current_u16:04X}, bit={lower_flag}, "
-                                     f"state={flag_state}, prev={previous_state}, offset=0x{flag_offset:X}, abs=0x{absolute_address:X}, "
-                                     f"scene={sceneindex}, upper={upper_flag}, loc={location_name}")
-                    
-                    if flag_state == 1 and previous_state == 0:
+                    # Only check locations if we're NOT initializing (to prevent false positives)
+                    if hasattr(self, '_initializing_flags') and self._initializing_flags:
+                        # First poll: just record current state, don't check locations
+                        self.previous_custom_flags[flag_id] = flag_state
+                        # Log initialization of already-set flags
+                        if flag_state == 1 and len(self.previous_custom_flags) < 20:
+                            location_name = self.location_names.lookup_in_slot(location_code, self.slot)
+                            logger.debug(f"[Init] Capturing already-set flag: {location_name} (scene={sceneindex}, flag={lower_flag})")
+                    elif flag_state == 1 and previous_state == 0:
                         # Flag was just set - location completed!
                         self.checked_locations.add(location_code)
                         # Get location name for logging
                         location_name = self.location_names.lookup_in_slot(location_code, self.slot)
                         flag_type = "Scene" if flag_space_trigger == 0 else "Dungeon"
                         logger.info(f"Location checked: {location_name}")
-                        logger.debug(f"   Flag details: type={flag_type}, scene={sceneindex}, flag={flag_num}, u16=0x{current_u16:04X}, bit={lower_flag}")
-                    
-                    self.previous_custom_flags[flag_id] = flag_state
-                else:
-                    self._failed_reads += 1
+                        logger.info(f"   Flag details: type={flag_type}, scene={sceneindex}, flag={lower_flag}, u16=0x{current_u16:04X}, bit={lower_flag}")
+                        logger.info(f"   Previous was {previous_state}, now is {flag_state}")
+                        
+                        # Update tracker with new location
+                        self.update_tracker_state()
+                        self.previous_custom_flags[flag_id] = flag_state
+                    elif flag_state == 1 and previous_state == 1:
+                        # Flag is set but was already set - this should NOT trigger a check
+                        # Log if this happens early on (potential false positive detection)
+                        if not hasattr(self, '_flag_already_set_logged'):
+                            self._flag_already_set_logged = set()
+                        if flag_id not in self._flag_already_set_logged and len(self._flag_already_set_logged) < 10:
+                            location_name = self.location_names.lookup_in_slot(location_code, self.slot)
+                            logger.debug(f"[StateCheck] Flag already set in both states: {location_name} (prev=1, curr=1)")
+                            self._flag_already_set_logged.add(flag_id)
+                        # Keep previous state (already correct)
+                    else:
+                        # Normal state tracking (flag is 0 or unchanged)
+                        self.previous_custom_flags[flag_id] = flag_state
                 
-                # Log read statistics every 100 polls
-                if self._flag_check_count % 100 == 0 and flag_id == list(self.custom_flag_to_location.keys())[0]:
-                    logger.debug(f"[CustomFlags] Poll #{self._flag_check_count}: Checked {len(self.custom_flag_to_location)} flags, Success: {self._successful_reads}/{len(self.custom_flag_to_location)}, Failed: {self._failed_reads}/{len(self.custom_flag_to_location)}")
-                    self._successful_reads = 0
-                    self._failed_reads = 0
-                    
             except Exception as e:
-                # Suppress repeated errors for the same address to avoid log spam
+                # Suppress repeated errors for the same scene to avoid log spam
                 if not hasattr(self, '_error_suppression'):
                     self._error_suppression = {}
-                error_key = flag_offset if 'flag_offset' in locals() and flag_offset is not None else flag_id
-                if error_key not in self._error_suppression:
-                    addr_str = f"0x{flag_offset:X}" if 'flag_offset' in locals() and flag_offset is not None else "unknown"
-                    logger.error(f"Error reading custom flag {flag_id} at offset {addr_str}: {e}")
-                    self._error_suppression[error_key] = True
+                scene_key = (flag_space_trigger, sceneindex)
+                if scene_key not in self._error_suppression:
+                    logger.error(f"Error reading custom flags from scene {sceneindex} (type {flag_space_trigger}): {e}")
+                    self._error_suppression[scene_key] = True
+        
+        # Clear initialization flag after first complete poll (outside the loop)
+        if hasattr(self, '_initializing_flags') and self._initializing_flags:
+            self._initializing_flags = False
+            initialized_count = len(self.previous_custom_flags)
+            # Count how many flags are already set
+            already_set = sum(1 for v in self.previous_custom_flags.values() if v == 1)
+            logger.info(f"[FlagInit] Initialized {initialized_count} custom flags - now monitoring for changes")
+            logger.info(f"[FlagInit] {already_set} flags were already set in save file")
     
     async def check_all_locations(self):
         """Check all locations using LocationFlags.py data (Wii addresses - may not work on Switch)."""
@@ -1324,6 +1521,9 @@ class SSHDContext(CommonContext):
                     self.checked_locations.add(location_id)
                     location_name_display = location_name[:50]  # Truncate long names
                     logger.info(f"Location checked: {location_name_display}")
+                    
+                    # Update tracker with new location
+                    self.update_tracker_state()
                     
             except Exception as e:
                 logger.debug(f"Error checking location {location_name}: {e}")
