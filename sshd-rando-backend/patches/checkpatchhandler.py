@@ -134,6 +134,14 @@ def determine_check_patches(
                     item_oarcs += item.oarcs
                 else:
                     item_oarcs.append(item.oarcs)
+            else:
+                # Item has no model (bugs, some treasures). The Rust code
+                # will fall back to "GetRupee" which is in the ObjectPack
+                # and always loaded, so no ARCN entry is needed. But we
+                # still need to make sure the item spawns properly, so
+                # add GetRupee as a safety net in case the stage doesn't
+                # have it from ObjectPack for some reason.
+                item_oarcs.append("GetRupee")
 
             if trap_oarcs:
                 if isinstance(trap_oarcs, list):

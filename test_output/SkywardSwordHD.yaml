@@ -1,0 +1,929 @@
+name: Player1
+description: Default Skyward Sword HD Archipelago Template
+
+game: Skyward Sword HD
+requires:
+  version: 0.6.6 # Version of Archipelago required for this yaml to work as expected.
+  game:
+    Skyward Sword HD: 1.0.0
+
+Skyward Sword HD:
+
+
+  # ========================================
+  # REQUIRED: PATH TO EXTRACTED ROM FILES
+  # ========================================
+  
+  # Path to extracted SSHD ROM (must contain romfs/ and exefs/ folders)
+  # On Windows: C:\\ProgramData\\Archipelago\\sshd_extract
+  # On Linux: /home/user/.local/share/Archipelago/sshd_extract
+  # On macOS: /Users/user/Library/Application Support/Archipelago/sshd_extract
+  extract_path: ""
+
+
+
+  # ====================================================================================
+
+
+
+  # ========================================
+  # ARCHIPELAGO OPTIONS
+  # ========================================
+  
+  # Death Link: When you die, everyone dies (and vice versa)
+  death_link: false
+  
+  # Progression Balancing
+  # Controls how much to front-load progression items to reduce waiting in multiworld
+  # 0: Completely random placement (no balancing)
+  # 25: Slight bias toward early game
+  # 50: Balanced placement (recommended for multiworld)
+  # 75: Strong bias toward early game
+  # 99: Maximum early placement
+  # Higher values help prevent players from waiting on others for key items
+  progression_balancing: 50
+
+
+
+  # ====================================================================================
+
+
+
+  # YOU HAVE THREE OPTIONS TO CONFIGURE YOUR RANDOMIZER SETTINGS:
+
+
+  # ========================================
+  # CONFIGURATION METHOD ONE: USING config.yaml
+  # This is the recommended method. It is the most user-friendly and will be compatible with all versions of the randomizer.
+  # ========================================
+  # Configure all of your settings in the vanilla Skyward Sword HD Randomizer application (only change the settings, do not generate).
+  # When you're done, there should be a config.yaml file in the randomizer folder. Copy its path into the field below and the settings will be imported from that file.
+  # Example: C:\\Users\\awesome_user\\Downloads\\Skyward_Sword_HD_Randomizer_v2.2_windows\\config.yaml
+  config_yaml_path: ""
+
+
+
+  # ========================================
+  # CONFIGURATION METHOD TWO: SETTING STRING
+  # NOT CURRENTLY WORKING RELIABLY ENOUGH - USE METHOD ONE OR THREE INSTEAD FOR NOW
+  # ========================================
+  # Leave setting_string BLANK to use manual configuration below
+  # Manual configuration gives you full control and avoids item mapping issues
+  setting_string: ""
+    
+  # Seed (e.g., "AirStrongholdPlantSkipper")
+  # Leave blank for random seed
+  sshdr_seed: ""
+
+
+
+  # ====================================================================================
+
+
+
+  # ========================================
+  # CONFIGURATION METHOD THREE: MANUAL SETTINGS
+  # ========================================
+  
+  
+  # ========================================
+  # CORE LOGIC SETTINGS
+  # ========================================
+  
+  # Logic Rules
+  # all_locations_reachable: Logic is considered when placing items. Tricks and Glitches can be enabled for consideration below.
+  # beatable_only: Only ensures the game is beatable. Some locations may be unreachable, and items required to reach those locations will not be placed at them.
+  logic_rules: all_locations_reachable
+  
+  # Item Pool Size
+  # minimal: No item upgrades will be shuffled into the item pool. There will only be 2 Beetles, 1 Bow, 1 Slingshot, and 1 Bug Net in the item pool.
+  # standard: Balanced default item pool
+  # extra: Extra items added for more variety
+  # plentiful: The standard item pool will be used plus 100% extra of the major items. E.g. There will be 8 Beetles, 6 Bows, 4 Mitts, etc...
+  item_pool: standard
+  
+  # Progressive Items
+  # true: Items with multiple tiers (Sword, Beetle, Bow, Slingshot, Bug Net, Mitts, Pouches, Wallets) will automatically upgrade to the next tier when collected
+  # false: Each tier is a separate item (e.g., you could find Tough Beetle before normal Beetle)
+  progressive_items: true
+  
+  # ========================================
+  # COMPLETION REQUIREMENTS
+  # ========================================
+  
+  # Number of dungeons required to complete the game (0-6)
+  # Beating Sky Keep is NOT required for this count
+  # Lanayru Mining Facility is beaten when exiting to the Temple of Time
+  # Other dungeons are beaten when the Goddess Crest is struck with a Skyward Strike
+  required_dungeon_count: 2
+  
+  # Sword requirement to open the Gate of Time
+  # Options: goddess_sword, goddess_longsword, goddess_white_sword, master_sword, true_master_sword
+  gate_of_time_sword_requirement: true_master_sword
+  
+  # Skip boss encounters at the end
+  skip_horde: false        # Skip The Horde fight
+  skip_ghirahim3: true    # Skip Ghirahim 3 fight
+  
+  # ========================================
+  # ITEM RANDOMIZATION
+  # ========================================
+  
+  # Toggle item category shuffling
+  gratitude_crystal_shuffle: false      # Single Gratitude Crystals can contain any item (false = only crystals)
+  stamina_fruit_shuffle: false          # Stamina Fruit locations can contain any item (false = only stamina fruit, locations revert after collection)
+  npc_closet_shuffle: false             # Randomized NPC closets (false = vanilla items)
+  hidden_item_shuffle: false            # Hidden Item checks can contain any item first time (false = always vanilla items)
+  goddess_chest_shuffle: false          # Goddess Chest items can be randomized (false = not required to activate/open)
+  tadtone_shuffle: false                # Tadtones in Flooded Faron Woods shuffled with world items (false = not shuffled)
+  gossip_stone_treasure_shuffle: false  # Gossip Stones give random items when raised (false = always visible, no items)
+  
+  # Rupee Shuffle Difficulty
+  # vanilla: Freestanding Rupees will not be randomized
+  # beginner: Easy rupee shuffle
+  # intermediate: Medium difficulty
+  # advanced: All freestanding Rupees can contain any item. Only a few extra Rupee checks are added but these are the most obscure and difficult checks to collect. You have been warned!
+  rupee_shuffle: vanilla
+  
+  # Number of trial treasures to shuffle (0-10)
+  # Randomizes treasures in Silent Realms to items. Items other than dusk relics will glow in Silent Realms (Yellow in Faron, Blue in Eldin, Green in Lanayru, and Red on Skyloft).
+  trial_treasure_shuffle: 0
+  
+  # ========================================
+  # KEY AND MAP PLACEMENT
+  # ========================================
+  
+  # Small Key Shuffle
+  # vanilla: Small Keys will appear in their vanilla locations
+  # own_dungeon: Keys only in their own dungeon (default)
+  # any_dungeon: Keys can be in any dungeon
+  # anywhere: Keys can be anywhere in the world
+  # keysy: Mixed between own dungeon and anywhere
+  small_key_shuffle: own_dungeon
+  
+  # Boss Key Shuffle
+  # vanilla: Boss Keys will appear in their vanilla locations
+  # own_dungeon: Boss keys only in their own dungeon (default)
+  # any_dungeon: Boss keys can be in any dungeon
+  # own_region: Boss Keys appear in their dungeon's region
+  # overworld: Boss Keys will only appear in the overworld
+  # anywhere: Boss keys can be anywhere in the world
+  # keysy: Mixed between own dungeon and anywhere
+  boss_key_shuffle: own_dungeon
+  
+  # Dungeon Map Shuffle
+  # vanilla: Maps will appear in their vanilla locations (default)
+  # own_dungeon_restricted: Maps will appear inside their respective dungeon, but won't appear on the heart container or dungeon end check.
+  # own_dungeon_unrestricted: Maps can appear anywhere inside their respective dungeon
+  # any_dungeon: Maps can appear inside any dungeon
+  # own_region: Maps will appear in their dungeon's region
+  # overworld: Maps will only appear in the overworld
+  # anywhere: Maps can appear anywhere
+  map_shuffle: vanilla
+  
+  # ========================================
+  # ENTRANCE RANDOMIZATION
+  # ========================================
+  
+  # Randomize only dungeon entrances?
+  # false: Entering a dungeon will lead to the vanilla dungeon
+  # true: Entering a dungeon will lead to a random dungeon
+  randomize_dungeons: false
+  
+  # Randomize Silent Realm trial entrances?
+  # false: Entering a Trial Gate will lead to the vanilla Silent Realm
+  # true: Entering a Trial Gate will lead to a random Silent Realm
+  randomize_trials: false
+  
+  # Randomize door entrances (interior and overworld doors)?
+  # false: Entering a door will lead to the vanilla exit on the other side
+  # true: Entering a door will lead to a random door exit on the other side
+  randomize_door_entrances: false
+  
+  # Decouple left/right double doors?
+  # false: Entering a left door will lead to the same location as the corresponding right door
+  # true: Entering a left door may lead somewhere different to the corresponding right door (only when Randomize Door Entrances is also enabled)
+  decouple_double_doors: false
+  
+  # Randomize interior building entrances?
+  # false: Entering a doorway, pushup door, or loadzone that leads to an interior location will lead to its vanilla location
+  # true: Entering a doorway, pushup door, or loadzone that leads to an interior location will lead to a random interior location
+  randomize_interior_entrances: false
+  
+  # Randomize overworld region entrances?
+  # false: Entering a doorway, pushup door, or loadzone that leads to an overworld location will lead to its vanilla location
+  # true: Entering a doorway, pushup door, or loadzone that leads to an overworld location will lead to a random overworld location
+  randomize_overworld_entrances: false
+  
+  # Decouple forward and return entrances?
+  # false: Entering a location and taking the entrance behind you will take you back to where you came from
+  # true: Entering a location and taking the entrance behind you will take you to a random location
+  decouple_entrances: false
+  
+  # Randomize Sky Keep room layout?
+  # false: The Sky Keep rooms will start in their vanilla positions
+  # true: The Sky Keep rooms will start in a random order
+  decouple_skykeep_layout: false
+  
+  # ========================================
+  # STARTING INVENTORY
+  # ========================================
+  
+  # Starting Sword
+  # no_sword: You will start without a sword
+  # practice_sword: You will start with 1 sword upgrade. You will not be able to use the Skyward Strike ability until you find another sword
+  # goddess_sword: You will start with 2 sword upgrades. You can use the Skyward Strike ability from the start of the game (default)
+  # goddess_longsword: You will start with 3 sword upgrades. Your sword will do more damage from the start of the game
+  # goddess_white_sword: You will start with 4 sword upgrades. You will have the completed dowsing wheel from the start of the game
+  # master_sword: You will start with 5 sword upgrades. You will deal maximum sword damage from the start of the game
+  # true_master_sword: You will start with all 6 sword upgrades. You will stun regular enemies with the sword from the start of the game
+  starting_sword: practice_sword
+  
+  # Number of tablets to start with (0-3)
+  # Tablets are randomly selected when count is 1 or 2
+  # Count 0 or 3 uses all tablets
+  starting_tablets: 0
+  
+  # Random Starting Bird Statues
+  # false: The bird statue unlocked at the start for each surface region will be unchanged
+  # true: The bird statue unlocked at the start for each surface region will be randomized. All overworld statues except Inside the Volcano and Inside the Fire Sanctuary may be chosen
+  random_starting_statues: false
+  
+  # Randomize Starting Spawn
+  # vanilla: You will start the game in Link's Bedroom
+  # anywhere: You will start the game at any valid entrance
+  random_starting_spawn: vanilla
+  
+  # Limit Starting Spawn
+  # false: If you spawn in a surface region, you may spawn in any surface province
+  # true: If you spawn in a surface region, you may only spawn in a province whose tablet you start with
+  limit_starting_spawn: false
+  
+  # Number of additional items to start with (0-6)
+  # The number of randomly chosen items you would like to start with. Only a selection of the most useful items are able to be chosen to maximize the benefit of this setting
+  random_starting_item_count: 0
+  
+  # ========================================
+  # CUSTOM STARTING ITEMS
+  # ========================================
+  # Add any item from the item pool to your starting inventory
+  # Format: "Item Name": count
+  # Leave empty {} for no custom items
+  # See Available_Starting_Items.yaml for all available items
+  # 
+  # EXAMPLE - to start with a bomb bag and a small quiver:
+  #   custom_starting_items:
+  #     "Bomb Bag": 1
+  #     "Small Quiver": 1
+  #
+  custom_starting_items: {}
+  
+  # ========================================
+  # TRAP CONFIGURATION
+  # ========================================
+  
+  # Trap Mode
+  # no_traps: All items in the game will be genuine (default)
+  # trapish: ~10% items are traps
+  # trapsome: ~25% items are traps
+  # traps_o_plenty: ~50% items are traps
+  # traptacular: All of the non-major items will be replaced with 'traps' that don't give the item they appear to be
+  trap_mode: no_traps
+  
+  # Trappable Items
+  # major_items: Traps mimic major items (default)
+  # non_major_items: Traps only mimic minor items
+  # any_items: Traps can mimic any item
+  trappable_items: major_items
+  
+  # ========================================
+  # TRAP TYPES (Controlled by the trap_mode setting)
+  # ========================================
+  # These settings control which trap types can appear in the game.
+  
+  # Burn Traps - Set you on fire
+  # false: Burn traps will not appear
+  # true: Burn traps can appear (default)
+  burn_traps: true
+  
+  # Curse Traps - Prevent you from using items
+  # false: Curse traps will not appear
+  # true: Curse traps can appear (default)
+  curse_traps: true
+  
+  # Noise Traps - Create loud sounds
+  # false: Noise traps will not appear
+  # true: Noise traps can appear (default)
+  noise_traps: true
+  
+  # Groose Traps - Spawn Groose the GOAT
+  # false: Groose traps will not appear (default)
+  # true: Groose traps can appear
+  groose_traps: false
+  
+  # Health Traps - Reduce your health
+  # false: Health traps will not appear (default)
+  # true: Health traps can appear
+  health_traps: false
+
+  # ========================================
+  # QUALITY OF LIFE SETTINGS
+  # ========================================
+  
+  # Thunderhead
+  # false: Thunderhead starts closed (default)
+  # true: The Thunderhead is open from the start
+  open_thunderhead: false
+  
+  # Lake Floria Gate
+  # vanilla: You are expected to climb the Great Tree, talk to Yerbal, and open the Lake Floria Gates with the Goddess Sword in order to enter Lake Floria
+  # yerbal: You are expected to climb the Great Tree and talk to Yerbal in order to enter Lake Floria
+  # open: The Lake Floria Gates will be opened from the start of the game (default)
+  open_lake_floria: open
+  
+  # Earth Temple
+  # open: The Earth Temple Door will be opened from the start of the game (default)
+  # shuffle_eldin: You will need to collect all the Earth Temple Key Pieces, shuffled within the Eldin Volcano region (including Mogma Turf if overworld entrances are not randomized), in order to open the Earth Temple Door
+  # shuffle_anywhere: You will need to collect all the Earth Temple Key Pieces, shuffled anywhere, in order to open the Earth Temple Door
+  open_earth_temple: false
+  
+  # Lanayru Mining Facility
+  # nodes: You will need to activate each of the 3 nodes and the main node in order to raise the Lanayru Mining Facility
+  # main_node: You will need to activate the main node in order to raise the Lanayru Mining Facility
+  # open: The Lanayru Mining Facility will be raised from the start of the game (default)
+  open_lmf: open
+  
+  # Batreaux Shed
+  # false: Batreaux Shed starts closed (default)
+  # true: Batreaux's Shed is open from the start
+  open_batreaux_shed: false
+  
+  # Skip Harp Playing
+  # false: Opening up Trial Gates and receiving items from The Old One will require strumming the harp (default)
+  # true: Trial Gates will automatically open up when you have obtained the harp and the appropriate song. Additionally, The Old One will not require you to play the harp to receive their item
+  skip_harp_playing: false
+  
+  # Skip Miscellaneous Small Cutscenes
+  # false: Misc cutscenes will play normally (default)
+  # true: Various small miscellaneous cutscenes will be skipped
+  skip_misc_cutscenes: false
+  
+  # ========================================
+  # DIFFICULTY SETTINGS
+  # ========================================
+  
+  # Damage Multiplier
+  # invincible: No damage taken (invincible)
+  # half: 50% damage taken
+  # normal: 100% damage taken (default)
+  # double: 200% damage taken
+  # quadruple: 400% damage taken
+  # ohko: One-hit knockout
+  damage_multiplier: normal
+  
+  # No Spoiler Log
+  # false: Spoiler log will be generated (default)
+  # true: No spoiler log will be generated
+  no_spoiler_log: false
+  
+  # ========================================
+  # MUSIC AND COSMETICS
+  # ========================================
+  
+  # Music Randomization
+  # vanilla: No music shuffle (default)
+  # shuffled: Background music randomly shuffled
+  # shuffled_limit_vanilla: Minimize unchanged tracks
+  music_randomization: vanilla
+  
+  # Cutoff Game Over Music
+  # false: Game over music will play normally (default)
+  # true: If music is randomized, very long songs will not play from game-over screen
+  cutoff_game_over_music: false
+  
+  # ========================================
+  # ADVANCED RANDOMIZATION OPTIONS
+  # ========================================
+  
+  # Enable Back in Time (BiT) Glitch
+  # false: You will not be able to perform the Back in Time (BiT) glitch from the Wii version of the game (default)
+  # true: You will be able to activate the Back in Time (BiT) glitch by soft-resetting the game (hold R+A+LeftStick) while also holding the L button
+  enable_back_in_time: false
+  
+  # Underground Rupee Shuffle
+  # false: Underground Rupee locations will not be randomized (default)
+  # true: Underground Rupee locations that require burrowing into digspots with the Mogma Mitts can contain any item
+  underground_rupee_shuffle: false
+  
+  # Beedle's Airshop Shuffle
+  # vanilla: Beedle's Airshop will contain its vanilla items
+  # junk_only: Beedle's Airshop will only contain junk items
+  # randomized: Beedle's Airshop can contain any items (default)
+  beedle_shop_shuffle: randomized
+  
+  # Random Bottle Contents
+  # false: There will be 3 Empty Bottles, 1 Revitalizing Potion, and 1 Bottle of Mushroom Spores in the item pool (default)
+  # true: There will be 5 Bottles in the item pool - each with random contents (e.g. Heart Potion, Hot Pumpkin Soup, Sacred Water, etc...)
+  random_bottle_contents: false
+  
+  # Randomize Shop Prices
+  # false: All shop prices will be unchanged from the vanilla game (default)
+  # true: All shop prices will be randomized without changing how many wallets are needed to obtain each check
+  randomize_shop_prices: false
+  
+  # Ammo Availability
+  # scarce: Only from drops and Gear shop
+  # vanilla: Appear when breaking pots (default)
+  # useful: Added in key places to reduce backtracking
+  # plentiful: Added next to all Bird Statues
+  ammo_availability: plentiful
+  
+  # Boss Key Puzzles
+  # correct_orientation: Keys fit immediately
+  # vanilla_orientation: Original orientation (default)
+  # random_orientation: Random orientation
+  boss_key_puzzles: vanilla_orientation
+  
+  # Minigame Difficulty
+  # easy: Easy minigames (default)
+  # medium: Medium difficulty
+  # hard: Challenging minigames
+  minigame_difficulty: easy
+  
+  # ========================================
+  # ADVANCED GAME OPTIONS
+  # ========================================
+  
+  # Chest Type Matches Contents
+  # off: Each chest will have the same type as it would in the vanilla game
+  # only_dungeon_items: Special chests only for dungeon items
+  # all_contents: Each chest will have a different type based on the item inside. Important items will appear in big blue chests. Boss Keys will appear in fancy chests. Other items will appear in brown, wooden chests (default)
+  chest_type_matches_contents: all_contents
+  
+  # Small Keys in Fancy Chests
+  # false: When Chest Type Matches Contents is not off, Small Keys will appear in big blue chests (default)
+  # true: When Chest Type Matches Contents is not off, Small Keys will appear in fancy chests
+  small_keys_in_fancy_chests: false
+  
+  # Full Wallet Upgrades
+  # false: Newly obtained wallets do not give any Rupees (default)
+  # true: Newly obtained wallets will come pre-filled with Rupees
+  full_wallet_upgrades: false
+  
+  # Random Trial Object Positions
+  # false: Trial objects appear in their vanilla locations (default)
+  # true: The positions of tears, light fruits, dusk relics, and stamina fruits will be shuffled amongst each other
+  random_trial_object_positions: false
+  
+  # Upgraded Skyward Strike
+  # false: Only the True Master Sword will have the fully upgraded Skyward Strike.
+  # true: The Goddess Sword (and better swords) will have the fully upgraded Skyward Strike (charges quicker and travels farther) (default)
+  upgraded_skyward_strike: true
+  
+  # Faster Air Meter Depletion
+  # false: Air meter depletes at normal speed (default)
+  # true: The air meter depletes at twice the normal rate when swimming like in Hero Mode
+  faster_air_meter_depletion: false
+  
+  # Unlock All Groosenator Destinations
+  # false: Groosenator destinations unlock normally (default)
+  # true: All Groosenator destinations are unlocked from the start
+  unlock_all_groosenator_destinations: false
+  
+  # Allow Flying at Night
+  # false: You will not be able to fly at night (default). If Require Natural Night Connections is disabled, night flying will be enabled to facilitate this
+  # true: You will be able to call your loftwing and fly in The Sky at night
+  allow_flying_at_night: false
+  
+  # Require Natural Night Connections
+  # false: You may be required to sleep to night and travel anywhere in the world to access nighttime-only checks, including flying at night
+  # true: You will not be required to sleep to night and travel to the overworld to access nighttime-only checks (default)
+  natural_night_connections: true
+  
+  # Peatrice Conversations
+  # How many times you need to talk to Peatrice before she calls you "darling" and you can start Peater's quest (0-6)
+  peatrice_conversations: 0
+  
+  # ========================================
+  # DUNGEON SETTINGS
+  # ========================================
+  
+  # Include Sky Keep as a Required Dungeon Option
+  # false: Only the 6 main dungeons may be selected as required dungeons (default)
+  # true: Sky Keep may be selected as a required dungeon needed to beat the seed. If selected, one of the "Sacred Power" locations will be chosen as the "Goal Location" containing an important item (shown on a stone tablet in the 1st room of Sky Keep)
+  dungeons_include_sky_keep: false
+  
+  # Barren Unrequired Dungeons
+  # false: Unrequired dungeons may contain items needed to beat the game
+  # true: Unrequired dungeons will be barren (default)
+  empty_unrequired_dungeons: true
+  
+  # Lanayru Caves Small Keys
+  # vanilla: The Lanayru Caves Keys will appear in their vanilla location
+  # removed: The Lanayru Caves Keys will not appear anywhere in the world and the locks will start opened (default)
+  lanayru_caves_keys: removed
+
+  # ========================================
+  # QUALITY OF LIFE SHORTCUTS
+  # ========================================
+  
+  # Isle of Songs Bridge Complete
+  # false: You will need to solve the bridge puzzle in order to enter inside of the Isle of Songs
+  # true: The bridge puzzle will be solved from the start of the game
+  shortcut_ios_bridge_complete: false
+  
+  # Sealed Spiral Log to Behind the Temple
+  # false: You will not be able to go through the entrance from the Sealed Grounds Spiral to Behind the Temple without entering from the other side where you can push down the log
+  # true: The log between the Sealed Grounds Spiral and Behind the Temple will be pushed down from the start of the game
+  shortcut_spiral_log_to_btt: false
+  
+  # Faron Woods Logs near Entry Bird Statue
+  # false: You will need a Sword or Clawshots to get to the main part of Faron Woods
+  # true: The logs from the Faron Woods entrance to the main part of Faron Woods will be pushed down from the start of the game
+  shortcut_logs_near_machi: false
+  
+  # Faron Woods Log to after Lake Floria
+  # false: You will not be able to go through the entrance from Faron Woods to after Lake Floria without entering from the other side where you can push down the log
+  # true: The log from the Faron Woods entrance to after Lake Floria will be pushed down from the start of the game
+  shortcut_faron_log_to_floria: false
+  
+  # Deep Woods Log before Tightrope
+  # false: You will need to bypass the hornet's nest to get to the back part of Deep Woods
+  # true: The log from the Deep Woods entrance to after the Tightrope will be pushed down from the start of the game
+  shortcut_deep_woods_log_before_tightrope: false
+  
+  # Deep Woods Log before Temple
+  # false: You will need to walk around to the Deep Woods bird statue to get to the Temple entrance
+  # true: The log from after the Deep Woods Tightrope before the Temple will be pushed down from the start of the game
+  shortcut_deep_woods_log_before_temple: false
+  
+  # Eldin Volcano Entrance Boulder
+  # false: You will need Bomb Bag to blow up the boulder down the left path from the Eldin Volcano entrance
+  # true: The boulder down the left path from the Eldin Volcano entrance will be blown up from the start of the game
+  shortcut_eldin_entrance_boulder: false
+  
+  # Eldin Volcano Boulder near Ascent
+  # false: You will need Bomb Bag or Hook Beetle to blow up the boulder near the Volcano Ascent bird statue before the wind vent to Hot Cave
+  # true: The boulder near Volcano Ascent will be blown up from the start of the game
+  shortcut_eldin_ascent_boulder: false
+  
+  # Volcano Summit Flames
+  # false: You will need an Empty Bottle, access to water, and Clawshots to get past the flames in Volcano Summit
+  # true: The two sets of flames in Volcano Summit will be removed from the start of the game
+  shortcut_vs_flames: false
+  
+  # Lanayru Desert Bars near Stone Cache
+  # false: You will need to find access the east side of Lanayru Desert before you can pull the lever and raise the bars
+  # true: The bars separating Lanayru Desert from Stone Cache will be raised from the start of the game
+  shortcut_lanayru_bars: false
+  
+  # Lanayru Desert Minecart on West Wall
+  # false: You will need to travel across the Sand Oasis to get to the West Desert bird statue
+  # true: The minecart which allows access to the Western Wall of Lanayru Desert will be pushed down from the start of the game
+  shortcut_west_wall_minecart: false
+  
+  # Lanayru Desert Minecart in Sand Oasis
+  # false: You will need to use Clawshots to get onto the Sand Oasis wall
+  # true: The minecart which allows access to the Sand Oasis wall will be pushed down from the start of the game
+  shortcut_sand_oasis_minecart: false
+  
+  # Lanayru Desert Minecart before Lanayru Caves
+  # false: You will need to use Clawshots or navigate across Sand Oasis to get to the end of Sand Oasis
+  # true: The minecart which allows access to the wall below the entrance to Lanayru Caves will be pushed down from the start of the game
+  shortcut_minecart_before_caves: false
+  
+  # Skyview Temple Boarded Shortcut
+  # false: You will need to hit the crystal switch and use a Sword to deactivate the single eye to get to the first hub room
+  # true: The wooden boards blocking access to the first hub room will be destroyed from the start of the game
+  shortcut_skyview_boards: false
+  
+  # Skyview Temple Bars before Boss Door
+  # false: You will need to use a 2nd Small Key and go through the 2nd Small Key locked room to get to the boss door
+  # true: The bars blocking access to the boss door will be raised from the start of the game
+  shortcut_skyview_bars: false
+  
+  # Earth Temple Pegs Bridge
+  # false: You will need to raise the bridge by rolling along the lava on the giant boulder
+  # true: The bridge in the main room of Earth Temple will be raised from the start of the game
+  shortcut_earth_temple_bridge: false
+  
+  # Lanayru Mining Facility Wind Gates in Hub Room
+  # false: You will need to reach the back of the hub room by going through the spike maze
+  # true: The wind gates blocking the central minecart path will be raised from the start of the game
+  shortcut_lmf_wind_gates: false
+  
+  # Lanayru Mining Facility Pushable Boxes
+  # false: You will need to push any boxes in the dungeon yourself
+  # true: All of the metal pushable boxes in the dungeon (that aren't covered in sand) will be pushed from the start of the game
+  shortcut_lmf_boxes: false
+  
+  # Lanayru Mining Facility Bars to West Side
+  # false: You will need to travel through the west rooms and defeat the single armos in order to get to the crawlspaces
+  # true: The bars blocking access to the crawlspaces will be raised from the start of the game
+  shortcut_lmf_bars_to_west_side: false
+  
+  # Ancient Cistern Bridge to Basement
+  # false: You will need to navigate the basement in order to freely move the giant statue
+  # true: The bridge to the long thread down to the basement will be extended from the start of the game. You will be able to freely move the giant statue without navigating the basement
+  shortcut_ac_bridge: false
+  
+  # Ancient Cistern Water Vents
+  # false: You will need to use the Whip to open the water vent shortcuts throughout the Ancient Cistern
+  # true: The water vents throughout the Ancient Cistern will be open from the start of the game
+  shortcut_ac_water_vents: false
+  
+  # Sandship Windows below Life Boat
+  # false: You will need to free the timeshift stone and open the windows below the life boat manually
+  # true: The windows below the life boat will be open from the start of the game
+  shortcut_sandship_windows: false
+  
+  # Sandship Bars before Brig
+  # false: You will need to activate both generators to save the crew locked in the brig
+  # true: The bars blocking access to the brig will be raised from the start of the game
+  shortcut_sandship_brig_bars: false
+  
+  # Fire Sanctuary Bars between Outdoor Bridges
+  # false: You will need to fight the double Magmanos and use the Mogma Mitts to bury underground in order to get to the second trapped mogma
+  # true: The bars between the two outside bridges will be raised from the start of the game
+  shortcut_fs_outside_bars: false
+  
+  # Fire Sanctuary Skip Lava Flow
+  # false: You will need to blow up the rock and escape the lava chase in order for the lava river at the end of Fire Sanctuary to be flowing
+  # true: The lava river at the end of Fire Sanctuary will be flowing from the start of the game
+  shortcut_fs_lava_flow: false
+  
+  # Sky Keep Bars in Skyview Temple Room
+  # false: You will need to traverse the Skyview Temple room in Sky Keep using most items in the item wheel to continue through Sky Keep
+  # true: The bars in the Skyview Temple room in Sky Keep will already be raised allowing you to skip traversing the room
+  shortcut_sky_keep_svt_room_bars: false
+  
+  # Sky Keep Lower Bars in Fire Sanctuary Room
+  # false: You will need to fully traverse the Fire Sanctuary room in Sky Keep by riding magma platforms and using the Beetle and Clawshots
+  # true: The lower bars in the Fire Sanctuary room in Sky Keep will already be raised. This does not change logic and merely speeds up this room
+  shortcut_sky_keep_fs_room_lower_bars: false
+  
+  # Sky Keep Upper Bars in Fire Sanctuary Room
+  # false: You will need to fully traverse the Fire Sanctuary room in Sky Keep by riding magma platforms and using the Beetle and Clawshots
+  # true: The upper bars in the Fire Sanctuary room in Sky Keep will already be raised. This completely skips riding the magma platforms as well as using the Beetle and Clawshots
+  shortcut_sky_keep_fs_room_upper_bars: false
+
+  # ========================================
+  # LOGIC TRICKS/ADVANCED OPTIONS
+  # ========================================
+  
+  # Early Lake Floria Jumpslash
+  # false: You will not be expected to enter Lake Floria using this trick
+  # true: You may need to enter Lake Floria by jumpslashing onto the fence and running out of bounds
+  logic_early_lake_floria: false
+  
+  # Beedle's Island Cage Chest Dive
+  # false: You will not be expected to get the Beedle's Island - Goddess Chest in Cage using this trick
+  # true: You may need to dive off your loftwing and skydive into the cage on Beedle's Island to get the chest
+  logic_beedles_island_cage_chest_dive: false
+  
+  # Volcanic Island Dive
+  # false: You will not be expected to get the Volcanic Island - Inside Goddess Chest using this trick
+  # true: You may need to skydive onto the raised ledge in the volcanic island to get the chest
+  logic_volcanic_island_dive: false
+  
+  # Inside the Thunderhead East Island Dive
+  # false: You will not be expected to get the Inside the Thunderhead - Chest on East Island using this trick
+  # true: You may need to skydive onto the archway to get the chest
+  logic_east_island_dive: false
+  
+  # Advanced Lizalfos Combat
+  # false: You will only be expected to defeat Lizalfos enemies with a sword
+  # true: You may need to defeat Lizalfos enemies with only bombs or only the Bow
+  logic_advanced_lizalfos_combat: false
+  
+  # Long Ranged Skyward Strikes
+  # false: You will not need to perform any Skyward Strikes that travel long distances
+  # true: You may need to perform ranged Skyward Strikes to hit distant Goddess Cubes, enemies, or switches
+  logic_long_ranged_skyward_strikes: false
+  
+  # Gravestone Jump
+  # false: You will only be expected to get to the Batreaux's door entrance by sleeping to night and bonking into the back-left gravestone
+  # true: You may need to jump onto the back-middle gravestone, then jump onto the back-right gravestone, then sidehop left in order to get to the Batreaux's door entrance during the daytime
+  logic_gravestone_jump: false
+  
+  # Waterfall Cave Jump
+  # false: You will only be expected to enter the end Waterfall Cave entrance by first exiting out of it into the loftwing prison area
+  # true: You may need to dive off the platform near Sparrot the Fortune-Teller's house and skydive towards the loftwing prison in order to enter the end Waterfall Cave entrance
+  logic_waterfall_cave_jump: false
+  
+  # Bird's Nest from Beedle's Airshop
+  # false: You will only be expected to get the Item in Bird's Nest by diving from the top of the Waterfall
+  # true: You may need to stop Beedle's Airshop near to the Bird's Nest and get the item by climbing the rope and using the Gust Bellows to blow away the dust and a Beetle to collect the item
+  logic_bird_nest_item_from_beedles_shop: false
+  
+  # Beedle's Airshop with Bombs
+  # false: You will only be expected to enter Beedle's Airshop using the Slingshot, Bow, Clawshots, or a Beetle to hit the bell
+  # true: You may need to precisely time a bomb explosion to hit the bell on Beedle's Airshop
+  logic_beedles_shop_with_bombs: false
+  
+  # Stutter Sprinting
+  # false: You will only be expected to continuously hold the sprint button in order to travel across quicksand or up slopes
+  # true: You may need to use short sprints in order to travel farther across quicksand or up slopes without the use of items
+  logic_stuttersprint: false
+  
+  # Precise Beetle Flying
+  # false: You will only be expected to use the Beetle in the same way as the vanilla game expects
+  # true: You may need to precisely move the Beetle to get distant checks or carry bomb flowers long distances
+  logic_precise_beetle: false
+  
+  # Precise Bomb Throws
+  # false: You will only be expected to use the Slingshot, Bow, Clawshots, or a Beetle to activate distant switches and you will only be expected to use nearby bomb flowers with the Hook Beetle to blow up distant rocks
+  # true: You may need to use the Bomb Bag and time bomb throws to activate switches or blow up distant rocks or towers
+  logic_bomb_throws: false
+  
+  # Faron Woods with Groosenator
+  # false: You will never be expected to use the Groosenator to access Faron Woods by unlocking bird statues in Flooded Faron Woods
+  # true: You may need to use the Groosenator to unlock the bird statues in Flooded Faron Woods to land at those bird statues in normal Faron Woods
+  logic_faron_woods_with_groosenator: false
+  
+  # Itemless First Timeshift Stone
+  # false: You will only be expected to use an item to activate the first timeshift stone in Lanayru Mine
+  # true: You may need to use the bomb flower near the Chus in order to activate the first timeshift stone in Lanayru Mine without items
+  logic_itemless_first_timeshift_stone: false
+  
+  # Stamina Potion through Sink Sand
+  # false: You will only be expected to navigate sink sand by creating paths to run on (usually done by knocking down statues by carrying bomb flowers with the Hook Beetle)
+  # true: You may need to purchase a stamina potion to run through sink sand further than is normally possible
+  logic_stamina_potion_through_sink_sand: false
+  
+  # Brakesliding
+  # false: You will only be expected to use items to help travel across quicksand
+  # true: You may need to use the brakeslide glitch in order to travel across quicksand
+  logic_brakeslide: false
+  
+  # Lanayru Mine Quick Bomb
+  # false: You are not expected to be able to enter Lanayru Mine from Lanayru Desert via the minecart
+  # true: You may need to enter Lanayru Mine from Lanayru Desert and use Bomb Bag to blow up the rock on the minecart track
+  logic_lanayru_mine_quick_bomb: false
+  
+  # Temple of Time Skip Brakeslide
+  # false: You will only be expected to get to east Lanayru Desert exiting from the Temple of Time area or one of the nodes, or with Clawshots
+  # true: You may need to use the brakeslide glitch to travel across the quicksand near the Caged Robot to east Lanayru Desert
+  logic_tot_skip_brakeslide: false
+  
+  # Temple of Time Precise Slingshot
+  # false: You will only be expected to use the Hook Beetle to activate the timeshift stone in the big tree near the Temple of Time
+  # true: You may need to use the Slingshot to precisely activate the timeshift stone in the big tree near the Temple of Time
+  logic_tot_slingshot: false
+  
+  # Activate Fire Node without Hook Beetle
+  # false: You will not be expected to get to the back of Fire Node without Hook Beetle
+  # true: You may need to throw a Baby Ampilus up onto the high ledge in Fire Node to lower the bars at the back
+  logic_fire_node_without_hook_beetle: false
+  
+  # Whip Bomb Flowers off Cacti
+  # false: You will only be expected to use bomb flowers that can be picked up off the ground or with the Hook Beetle
+  # true: You may need to use the Whip to pick up bomb flowers from on top of cacti
+  logic_cactus_bomb_whip: false
+  
+  # Skipper's Retreat Fast Clawshots
+  # false: You will only be expected to get to the top of Skipper's Retreat with an item to defeat the Deku Baba
+  # true: You may need to use the Clawshots to stun the Deku Baba in-front of the clawshot target in Skipper's Retreat and quickly clawshot across the gaps
+  logic_skippers_fast_clawshots: false
+  
+  # Skyview Temple Spider Roll
+  # false: You will only be expected to find an alternative path around Skultullas on their webs in the Skyview Temple
+  # true: You may need to roll next the Skultullas in the Skyview Temple while they are on their webs in order to get past them
+  logic_skyview_spider_roll: false
+  
+  # Skyview Coiled Rupee Jump
+  # false: You will only be expected to get the Rupee check on the Coiled Branch in the Skyview Temple using the Beetle
+  # true: You may need to use a Sword to jump-slash into the Rupee check on the Coiled Branch in the Skyview Temple
+  logic_skyview_coiled_rupee_jump: false
+  
+  # Skyview Temple Precise Slingshot
+  # false: You will only be expected to get the Skyview Temple - Item behind Bars by either using the Beetle to hit the crystal or by using the Whip
+  # true: You may need to use the Slingshot to precisely hit the crystal at the top of the second hub room to get the Skyview Temple - Item behind Bars
+  logic_skyview_precise_slingshot: false
+  
+  # Earth Temple Keese Skyward Strike
+  # false: You will only be expected to break the high rope on the first Earth Temple bridge using a Beetle or the Bow
+  # true: You may need to precisely manipulate a specific Keese's position and use a long range Skyward Strike to break the high rope on the first bridge in Earth Temple
+  logic_et_keese_skyward_strike: false
+  
+  # Earth Temple Slope Stuttersprint
+  # false: You will only be expected to get to the top of the second Earth Temple slope by opening the blocked cubby part-way up the slope so you can recover stamina
+  # true: You may need to manipulate the boulders to fall on the second Earth Temple slope so that you can stuttersprint to the top without getting hit
+  logic_et_slope_stuttersprint: false
+  
+  # Earth Temple Bomb Flower Scaldera
+  # false: You will only be expected to defeat Scaldera using the Bomb Bag and a Sword
+  # true: You may need to defeat Scaldera using only the bomb flowers at the top of the boss arena and the fully upgraded Skyward Strike
+  logic_et_bombless_scaldera: false
+  
+  # Lanayru Mining Facility Whip Switch
+  # false: You will only be expected to flip the left lever in the first room of Lanayru Mining Facility by using the Hook Beetle to knock down the statue platform
+  # true: You may need to run into the quicksand and use the Whip to flip the left lever in the first room of Lanayru Mining Facility
+  logic_lmf_whip_switch: false
+  
+  # Lanayru Mining Facility Precise Slingshot
+  # false: You will only be expected to hit the timeshift stone in the key-locked room in Lanayru Mining Facility with the Beetle or Bow
+  # true: You may need to precisely use the Slingshot to hit the timeshift stone in the key-locked room in Lanayru Mining Facility
+  logic_lmf_ceiling_precise_slingshot: false
+  
+  # Lanayru Mining Facility Whip Timeshift Stone
+  # false: You will only be expected to hit the timeshift stone in the Armos room of Lanayru Mining Facility with a Skyward Strike, Slingshot, or Bow
+  # true: You may need to use the Whip to hit the timeshift stone in the Armos room of Lanayru Mining Facility
+  logic_lmf_whip_armos_room_timeshift_stone: false
+  
+  # Lanayru Mining Facility Ride on Minecart
+  # false: You will only be expected to get to the vanilla boss key room by opening the Wind Gates and following the central minecart path
+  # true: You may need to jump onto and ride the minecart in-front of the Lanayru Mining Facility boss door to get to the vanilla boss key room
+  logic_lmf_minecart_jump: false
+  
+  # Lanayru Mining Facility Moldarach without Gust Bellows
+  # false: You will only be expected to defeat Moldarach in Lanayru Mining Facility with the Gust Bellows
+  # true: You may need to defeat Moldarach in Lanayru Mining Facility without the Gust Bellows
+  logic_lmf_bellowsless_moldarach: false
+  
+  # Ancient Cistern Lever Jump
+  # false: You will only be expected to use the Whip to flip the lever that stops the waterfall in Ancient Cistern
+  # true: You may need to jump down from above to flip the lever that stops the waterfall in Ancient Cistern
+  logic_ac_lever_jump_trick: false
+  
+  # Ancient Cistern Chest after Whip Hooks Jump
+  # false: You will only be expected to get the Ancient Cistern - Chest after Whip Hooks by using the Whip
+  # true: You may be expected to get the Ancient Cistern - Chest after Whip Hooks by jumping down from the higher platform after exiting the basement via the long thread
+  logic_ac_chest_after_whip_hooks_jump: false
+  
+  # Sandship Jump to Stern
+  # false: You will only be expected to get the Sandship - Chest at Ship's Stern by using the Clawshots
+  # true: You may need to get the Sandship - Chest at Ship's Stern by side-hopping from the top of the mast
+  logic_sandship_jump_to_stern: false
+  
+  # Sandship Itemless Spume
+  # false: You will only be expected to get past the Spume in the Sandship corridor by defeating it or stunning it with the Slingshot
+  # true: You may need to get past the Spume in the Sandship corridor without any items
+  logic_sandship_itemless_spume: false
+  
+  # Sandship No Combination Hint
+  # false: You will only be expected to open the combination lock in the Sandship if you have the Gust Bellows to uncover the combination
+  # true: You may need to open the combination lock in the Sandship without using the Gust Bellows to get the combination
+  logic_sandship_no_combination_hint: false
+  
+  # Fire Sanctuary Pillar Jump
+  # false: You will only be expected to cross the broken bridge in Fire Sanctuary with the Clawshots
+  # true: You may need to precisely jump around the pillars on the broken bridge in Fire Sanctuary
+  logic_fs_pillar_jump: false
+  
+  # Fire Sanctuary Ghirahim 2 with Practice Sword
+  # false: You will only be expected to defeat Ghirahim 2 with Goddess Sword or better
+  # true: You may need to defeat Ghirahim 2 with Practice Sword
+  logic_fs_practice_sword_ghirahim_2: false
+  
+  # Present Bow Switch Shots
+  # false: You will only be expected to hit Bow switches in the past when they are not covered by barbed wire
+  # true: You may need to hit Bow switches in the present when they are covered by barbed wire
+  logic_present_bow_switches: false
+  
+  # Sky Keep Vine Clip
+  # false: You will only be expected to use the Beetle and Clawshots to travel across the Fire Sanctuary room in Sky Keep
+  # true: You may need to use the Bomb Bag and Clawshots to clip through the vines in the Fire Sanctuary room in Sky Keep
+  logic_skykeep_vineclip: false
+
+  # ========================================
+  # COSMETIC OPTIONS
+  # ========================================
+  
+  # Tunic Swap
+  # false: Link will be dressed in his green knight's uniform (default)
+  # true: Link will be dressed in his Skyloft outfit seen at the start of the vanilla game
+  tunic_swap: false
+  
+  # Lightning Skyward Strike
+  # false: Skyward strikes will only have the lightning effect when in the Demise fight
+  # true: Skyward strikes will have the lighting particle effects at all times
+  lightning_skyward_strike: false
+  
+  # Starry Skies
+  # false: Stars will only appear in the sky at night (default)
+  # true: Stars will appear in the sky during the day and night
+  starry_skies: false
+  
+  # Remove Enemy Music
+  # false: The background music will be interrupted by enemy drums when you get near to an enemy (default)
+  # true: The background music will continue to play when you get near to enemies
+  remove_enemy_music: false
+
+  # ========================================
+  # EXTRA STARTING INVENTORY
+  # ========================================
+  
+  # Starting Hearts
+  # Number of hearts to start with (6-18, default 6)
+  starting_hearts: 6
+  
+  # Start with All Bugs
+  # false: You will start the game without any bugs in your inventory (default)
+  # true: You will start the game with 99 of each bug in your inventory
+  start_with_all_bugs: false
+  
+  # Start with All Treasures
+  # false: You will start the game without any treasures in your inventory (default)
+  # true: You will start the game with 99 of each treasure in your inventory
+  start_with_all_treasures: false

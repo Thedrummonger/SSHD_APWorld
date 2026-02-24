@@ -876,13 +876,17 @@ class SSHDContext(CommonContext):
         if not self.tracker_bridge:
             return
         
-        # Build received items dictionary
-        received_items = dict(self.progressive_counts)
+        # Build received items dictionary from ALL items (including starting items)
+        received_items = {}
         
-        # Add items from queue (not yet delivered)
-        for item in self.item_queue:
-            item_name = item.get("name", "Unknown Item")
-            received_items[item_name] = received_items.get(item_name, 0) + 1
+        # Process all items from items_received (this includes starting items + all received items)
+        if hasattr(self, 'items_received') and self.items_received:
+            for network_item in self.items_received:
+                try:
+                    item_name = self.item_names.lookup_in_slot(network_item.item, self.slot)
+                    received_items[item_name] = received_items.get(item_name, 0) + 1
+                except Exception as e:
+                    logger.debug(f"Failed to lookup item {network_item.item}: {e}")
         
         # Create location name mapping
         location_names = {}
@@ -903,6 +907,8 @@ class SSHDContext(CommonContext):
             item_names=None,  # Could add if needed
             slot_data=self.slot_data,
         )
+        
+        logger.debug(f"Updated tracker: {len(self.checked_locations)} locations, {len(received_items)} item types, {sum(received_items.values())} total items")
 
     
     def on_package(self, cmd: str, args: dict):
@@ -1003,7 +1009,14 @@ class SSHDContext(CommonContext):
                 except (KeyError, TypeError):
                     sender_name = f"Player {location_player}"
                 
-                logger.debug(f"[ReceivedItems] item_id={item_id}, item_name='{item_name}', location='{location_name}', from={sender_name}")
+                # Precollected / start-inventory items have location_id == -2.
+                # The sshd-rando patches already bake these into the game save,
+                # so we must NOT give them again via the memory buffer.
+                is_start_inventory = (location_id == -2)
+                if is_start_inventory:
+                    logger.debug(f"[ReceivedItems] START INVENTORY item_id={item_id}, item_name='{item_name}' (will skip in-game delivery)")
+                else:
+                    logger.debug(f"[ReceivedItems] item_id={item_id}, item_name='{item_name}', location='{location_name}', from={sender_name}")
                 
                 # Add to queue to be given in-game
                 self.item_queue.append({
@@ -1013,6 +1026,7 @@ class SSHDContext(CommonContext):
                     "location_player": location_player,  # Who found it
                     "player_name": sender_name,
                     "index": start_index + i,
+                    "is_start_inventory": is_start_inventory,
                 })
         
         elif cmd == "LocationInfo":
@@ -1239,7 +1253,22 @@ class SSHDContext(CommonContext):
             # Give queued items to player
             if self.item_queue:
                 item_data = self.item_queue[0]
-                if self.give_item_to_player(item_data["name"], item_data["id"]):
+                
+                # Start-inventory items (precollected) are already baked into the
+                # game save by sshd-rando patches.  We must NOT give them again via
+                # the memory buffer, but we DO need to advance the progressive
+                # counter so that future progressive items resolve to the right tier.
+                if item_data.get("is_start_inventory", False):
+                    item_name = item_data["name"]
+                    if item_name in self.progressive_counts:
+                        self.progressive_counts[item_name] += 1
+                        logger.debug(f"[StartInventory] Tracked {item_name} progressive count -> {self.progressive_counts[item_name]}")
+                    logger.debug(f"[StartInventory] Skipped in-game delivery of {item_name} (already in save from patches)")
+                    self.item_queue.pop(0)
+                    self.delivered_item_count += 1
+                    self.save_progress()
+                    self.update_tracker_state()
+                elif self.give_item_to_player(item_data["name"], item_data["id"]):
                     # Successfully gave item
                     player_name = item_data.get("player_name", "another player")
                     location_name = item_data.get("location", "unknown location")
@@ -1439,9 +1468,9 @@ class SSHDContext(CommonContext):
                         # Get location name for logging
                         location_name = self.location_names.lookup_in_slot(location_code, self.slot)
                         flag_type = "Scene" if flag_space_trigger == 0 else "Dungeon"
-                        logger.info(f"Location checked: {location_name}")
-                        logger.info(f"   Flag details: type={flag_type}, scene={sceneindex}, flag={lower_flag}, u16=0x{current_u16:04X}, bit={lower_flag}")
-                        logger.info(f"   Previous was {previous_state}, now is {flag_state}")
+                        logger.debug(f"Location checked: {location_name}")
+                        logger.debug(f"   Flag details: type={flag_type}, scene={sceneindex}, flag={lower_flag}, u16=0x{current_u16:04X}, bit={lower_flag}")
+                        logger.debug(f"   Previous was {previous_state}, now is {flag_state}")
                         
                         # Update tracker with new location
                         self.update_tracker_state()

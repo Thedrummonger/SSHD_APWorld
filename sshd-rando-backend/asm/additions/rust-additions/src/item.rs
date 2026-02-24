@@ -1410,6 +1410,13 @@ pub extern "C" fn resolve_progressive_item_models(
     }
 }
 
+// Helper function to get fallback models for items without defined models.
+// Uses GetRupee because it's in the ObjectPack and always available in every
+// stage.
+fn get_fallback_model_for_item(_item_id: u16) -> *const c_char {
+    c"GetRupee".as_ptr()
+}
+
 #[no_mangle]
 pub extern "C" fn get_arc_model_from_item(
     arc_table: *mut c_void,
@@ -1418,16 +1425,26 @@ pub extern "C" fn get_arc_model_from_item(
 ) -> *mut c_void {
     unsafe {
         // Safety check: If arc_name is null (item has no model defined),
-        // return null to prevent crash. This happens with bugs/materials.
+        // use a fallback model based on item type. This happens with bugs/treasures.
         if arc_name.is_null() {
-            return core::ptr::null_mut();
+            let fallback_model = get_fallback_model_for_item(item_id);
+            return dRawArcTable_c__getDataFromOarc(
+                arc_table,
+                fallback_model,
+                c"g3d/model.brres".as_ptr(),
+            );
         }
 
         let resolved_model_name = resolve_progressive_item_models(arc_name, item_id, 1);
 
-        // Additional safety check after resolution
+        // Additional safety check after resolution - use fallback
         if resolved_model_name.is_null() {
-            return core::ptr::null_mut();
+            let fallback_model = get_fallback_model_for_item(item_id);
+            return dRawArcTable_c__getDataFromOarc(
+                arc_table,
+                fallback_model,
+                c"g3d/model.brres".as_ptr(),
+            );
         }
 
         return dRawArcTable_c__getDataFromOarc(
@@ -1445,12 +1462,12 @@ pub extern "C" fn get_item_model_name_ptr(
 ) -> *const c_char {
     unsafe {
         // Safety check: If model_name is null (item has no model defined),
-        // return null to prevent crash. This happens with bugs/materials.
+        // use fallback model name. This happens with bugs/treasures.
         if model_name.is_null() {
             // Replaced code still needs to execute
             asm!("mov x1, {0:x}", in(reg) item_id);
             asm!("cmp x1, #0x1C");
-            return core::ptr::null();
+            return get_fallback_model_for_item(item_id);
         }
 
         let resolved_model_name = resolve_progressive_item_models(model_name, item_id, 2);
@@ -1487,10 +1504,13 @@ pub extern "C" fn change_model_scale(item_actor: *mut dAcItem, world_matrix: *mu
         }
 
         // Replaced code
-        ((*(*(*item_actor).item_model_ptr).vtable).set_local_matrix)(
-            (*item_actor).item_model_ptr,
-            world_matrix,
-        );
+        // Safety check: skip if item_model_ptr is null (model failed to load)
+        if !(*item_actor).item_model_ptr.is_null() {
+            ((*(*(*item_actor).item_model_ptr).vtable).set_local_matrix)(
+                (*item_actor).item_model_ptr,
+                world_matrix,
+            );
+        }
     }
 }
 

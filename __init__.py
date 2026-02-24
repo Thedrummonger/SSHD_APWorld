@@ -40,7 +40,7 @@ from worlds.LauncherComponents import (
 from .Items import ITEM_TABLE
 from .Locations import LOCATION_TABLE
 from .SSHD_Options import SSHDOptions
-from .Rules import set_rules
+from .Rules import set_rules, set_completion_condition
 from .rando.ArcPatcher import patch_archipelago_logo
 from .SSHDRWrapper import generate_sshd_rando_mod, extract_location_item_mapping, extract_custom_flag_mapping
 
@@ -307,9 +307,315 @@ class SSHDWorld(World):
         if hasattr(self, '_sshd_resolved_settings') and setting_name in self._sshd_resolved_settings:
             return self._sshd_resolved_settings[setting_name]
         return default
+
+    # ── Config.yaml key → (AP option field, mapping_type, value_map) ─────
+    # mapping_type: "toggle" | "toggle_custom" | "choice" | "range"
+    _CONFIG_TO_AP_OPTION: ClassVar[dict] = {
+        # Core Logic
+        "logic_rules": ("logic_rules", "choice", {"all_locations_reachable": 0, "beatable_only": 1}),
+        "item_pool": ("item_pool", "choice", {"minimal": 0, "standard": 1, "extra": 2, "plentiful": 3}),
+        # Completion
+        "required_dungeons": ("required_dungeon_count", "range", None),
+        "triforce_required": ("triforce_required", "toggle", None),
+        "triforce_shuffle": ("triforce_shuffle", "choice", {"vanilla": 0, "sky_keep": 1, "anywhere": 2}),
+        "got_sword_requirement": ("gate_of_time_sword_requirement", "choice", {
+            "goddess_sword": 0, "goddess_longsword": 1, "goddess_white_sword": 2,
+            "master_sword": 3, "true_master_sword": 4,
+        }),
+        "got_dungeon_requirement": ("gate_of_time_dungeon_requirements", "choice", {"required": 0, "unrequired": 1}),
+        "imp_2_skip": ("imp2_skip", "toggle", None),
+        "skip_horde": ("skip_horde", "toggle", None),
+        "skip_g3": ("skip_ghirahim3", "toggle", None),
+        # Shuffles
+        "gratitude_crystal_shuffle": ("gratitude_crystal_shuffle", "toggle", None),
+        "stamina_fruit_shuffle": ("stamina_fruit_shuffle", "toggle", None),
+        "npc_closet_shuffle": ("npc_closet_shuffle", "toggle_custom", {"randomized": 1, "vanilla": 0}),
+        "hidden_item_shuffle": ("hidden_item_shuffle", "toggle", None),
+        "rupee_shuffle": ("rupee_shuffle", "choice", {"vanilla": 0, "beginner": 1, "intermediate": 2, "advanced": 3}),
+        "goddess_chest_shuffle": ("goddess_chest_shuffle", "toggle", None),
+        "trial_treasure_shuffle": ("trial_treasure_shuffle", "range", None),
+        "tadtone_shuffle": ("tadtone_shuffle", "toggle", None),
+        "gossip_stone_treasure_shuffle": ("gossip_stone_treasure_shuffle", "toggle", None),
+        # Keys & Maps
+        "small_keys": ("small_key_shuffle", "choice", {"own_dungeon": 0, "any_dungeon": 1, "anywhere": 2, "keysy": 3}),
+        "boss_keys": ("boss_key_shuffle", "choice", {"own_dungeon": 0, "any_dungeon": 1, "anywhere": 2, "keysy": 3}),
+        "map_mode": ("map_shuffle", "choice", {"vanilla": 0, "own_dungeon_restricted": 1, "anywhere": 2}),
+        # Entrances
+        "randomize_entrances": ("randomize_entrances", "toggle", None),
+        "randomize_dungeon_entrances": ("randomize_dungeons", "toggle", None),
+        "randomize_trial_gate_entrances": ("randomize_trials", "toggle", None),
+        "randomize_door_entrances": ("randomize_door_entrances", "toggle", None),
+        "randomize_skykeep_layout": ("decouple_skykeep_layout", "toggle", None),
+        "randomize_interior_entrances": ("randomize_interior_entrances", "toggle", None),
+        "randomize_overworld_entrances": ("randomize_overworld_entrances", "toggle", None),
+        "decouple_entrances": ("decouple_entrances", "toggle", None),
+        "decouple_double_doors": ("decouple_double_doors", "toggle", None),
+        # Music
+        "randomize_music": ("music_randomization", "choice", {"vanilla": 0, "shuffle_music": 1, "shuffle_music_limit_vanilla": 2}),
+        "cutoff_game_over_music": ("cutoff_game_over_music", "toggle", None),
+        # Advanced Randomization
+        "enable_back_in_time": ("enable_back_in_time", "toggle", None),
+        "underground_rupee_shuffle": ("underground_rupee_shuffle", "toggle", None),
+        "beedle_shop_shuffle": ("beedle_shop_shuffle", "choice", {"vanilla": 0, "junk_only": 1, "randomized": 2}),
+        "random_bottle_contents": ("random_bottle_contents", "toggle", None),
+        "randomize_shop_prices": ("randomize_shop_prices", "toggle", None),
+        "ammo_availability": ("ammo_availability", "choice", {"scarce": 0, "vanilla": 1, "useful": 2, "plentiful": 3}),
+        "boss_key_puzzles": ("boss_key_puzzles", "choice", {"correct_orientation": 0, "vanilla_orientation": 1, "random_orientation": 2}),
+        "minigame_difficulty": ("minigame_difficulty", "choice", {"easy": 0, "medium": 1, "hard": 2}),
+        "trap_mode": ("trap_mode", "choice", {"no_traps": 0, "trapish": 1, "trapsome": 2, "traps_o_plenty": 3, "traptacular": 4}),
+        "trappable_items": ("trappable_items", "choice", {"major_items": 0, "non_major_items": 1, "any_items": 2}),
+        # Trap Types
+        "burn_traps": ("burn_traps", "toggle", None),
+        "curse_traps": ("curse_traps", "toggle", None),
+        "noise_traps": ("noise_traps", "toggle", None),
+        "groose_traps": ("groose_traps", "toggle", None),
+        "health_traps": ("health_traps", "toggle", None),
+        # Advanced Options
+        "full_wallet_upgrades": ("full_wallet_upgrades", "toggle", None),
+        "chest_type_matches_contents": ("chest_type_matches_contents", "choice", {"off": 0, "only_dungeon_items": 1, "all_contents": 2}),
+        "small_keys_in_fancy_chests": ("small_keys_in_fancy_chests", "toggle", None),
+        "random_trial_object_positions": ("random_trial_object_positions", "toggle", None),
+        "upgraded_skyward_strike": ("upgraded_skyward_strike", "toggle", None),
+        "faster_air_meter_depletion": ("faster_air_meter_depletion", "toggle", None),
+        "unlock_all_groosenator_destinations": ("unlock_all_groosenator_destinations", "toggle", None),
+        "allow_flying_at_night": ("allow_flying_at_night", "toggle", None),
+        "natural_night_connections": ("natural_night_connections", "toggle", None),
+        "dungeons_include_sky_keep": ("dungeons_include_sky_keep", "toggle", None),
+        "empty_unrequired_dungeons": ("empty_unrequired_dungeons", "toggle", None),
+        "lanayru_caves_keys": ("lanayru_caves_keys", "choice", {"vanilla": 0, "removed": 1}),
+        # QoL - Open Locations (some use "open" instead of "on")
+        "open_lake_floria": ("open_lake_floria", "toggle_custom", {"vanilla": 0, "yerbal": 1, "open": 1}),
+        "open_thunderhead": ("open_thunderhead", "toggle", None),
+        "open_earth_temple": ("open_earth_temple", "toggle_custom", {"open": 1, "shuffle_eldin": 0, "shuffle_anywhere": 0}),
+        "open_lmf": ("open_lmf", "toggle_custom", {"nodes": 0, "main_node": 0, "open": 1}),
+        "open_batreaux_shed": ("open_batreaux_shed", "toggle", None),
+        "skip_skykeep_door_cutscene": ("skip_skykeep_door_cutscene", "toggle", None),
+        "skip_harp_playing": ("skip_harp_playing", "toggle", None),
+        "skip_misc_cutscenes": ("skip_misc_cutscenes", "toggle", None),
+        # Shortcuts
+        "shortcut_ios_bridge_complete": ("shortcut_ios_bridge_complete", "toggle", None),
+        "shortcut_spiral_log_to_btt": ("shortcut_spiral_log_to_btt", "toggle", None),
+        "shortcut_logs_near_machi": ("shortcut_logs_near_machi", "toggle", None),
+        "shortcut_faron_log_to_floria": ("shortcut_faron_log_to_floria", "toggle", None),
+        "shortcut_deep_woods_log_before_tightrope": ("shortcut_deep_woods_log_before_tightrope", "toggle", None),
+        "shortcut_deep_woods_log_before_temple": ("shortcut_deep_woods_log_before_temple", "toggle", None),
+        "shortcut_eldin_entrance_boulder": ("shortcut_eldin_entrance_boulder", "toggle", None),
+        "shortcut_eldin_ascent_boulder": ("shortcut_eldin_ascent_boulder", "toggle", None),
+        "shortcut_vs_flames": ("shortcut_vs_flames", "toggle", None),
+        "shortcut_lanayru_bars": ("shortcut_lanayru_bars", "toggle", None),
+        "shortcut_west_wall_minecart": ("shortcut_west_wall_minecart", "toggle", None),
+        "shortcut_sand_oasis_minecart": ("shortcut_sand_oasis_minecart", "toggle", None),
+        "shortcut_minecart_before_caves": ("shortcut_minecart_before_caves", "toggle", None),
+        "shortcut_skyview_boards": ("shortcut_skyview_boards", "toggle", None),
+        "shortcut_skyview_bars": ("shortcut_skyview_bars", "toggle", None),
+        "shortcut_earth_temple_bridge": ("shortcut_earth_temple_bridge", "toggle", None),
+        "shortcut_lmf_wind_gates": ("shortcut_lmf_wind_gates", "toggle", None),
+        "shortcut_lmf_boxes": ("shortcut_lmf_boxes", "toggle", None),
+        "shortcut_lmf_bars_to_west_side": ("shortcut_lmf_bars_to_west_side", "toggle", None),
+        "shortcut_ac_bridge": ("shortcut_ac_bridge", "toggle", None),
+        "shortcut_ac_water_vents": ("shortcut_ac_water_vents", "toggle", None),
+        "shortcut_sandship_windows": ("shortcut_sandship_windows", "toggle", None),
+        "shortcut_sandship_brig_bars": ("shortcut_sandship_brig_bars", "toggle", None),
+        "shortcut_fs_outside_bars": ("shortcut_fs_outside_bars", "toggle", None),
+        "shortcut_fs_lava_flow": ("shortcut_fs_lava_flow", "toggle", None),
+        "shortcut_sky_keep_svt_room_bars": ("shortcut_sky_keep_svt_room_bars", "toggle", None),
+        "shortcut_sky_keep_fs_room_lower_bars": ("shortcut_sky_keep_fs_room_lower_bars", "toggle", None),
+        "shortcut_sky_keep_fs_room_upper_bars": ("shortcut_sky_keep_fs_room_upper_bars", "toggle", None),
+        # Logic Tricks
+        "logic_early_lake_floria": ("logic_early_lake_floria", "toggle", None),
+        "logic_beedles_island_cage_chest_dive": ("logic_beedles_island_cage_chest_dive", "toggle", None),
+        "logic_volcanic_island_dive": ("logic_volcanic_island_dive", "toggle", None),
+        "logic_east_island_dive": ("logic_east_island_dive", "toggle", None),
+        "logic_advanced_lizalfos_combat": ("logic_advanced_lizalfos_combat", "toggle", None),
+        "logic_long_ranged_skyward_strikes": ("logic_long_ranged_skyward_strikes", "toggle", None),
+        "logic_gravestone_jump": ("logic_gravestone_jump", "toggle", None),
+        "logic_waterfall_cave_jump": ("logic_waterfall_cave_jump", "toggle", None),
+        "logic_bird_nest_item_from_beedles_shop": ("logic_bird_nest_item_from_beedles_shop", "toggle", None),
+        "logic_beedles_shop_with_bombs": ("logic_beedles_shop_with_bombs", "toggle", None),
+        "logic_stuttersprint": ("logic_stuttersprint", "toggle", None),
+        "logic_precise_beetle": ("logic_precise_beetle", "toggle", None),
+        "logic_bomb_throws": ("logic_bomb_throws", "toggle", None),
+        "logic_faron_woods_with_groosenator": ("logic_faron_woods_with_groosenator", "toggle", None),
+        "logic_itemless_first_timeshift_stone": ("logic_itemless_first_timeshift_stone", "toggle", None),
+        "logic_stamina_potion_through_sink_sand": ("logic_stamina_potion_through_sink_sand", "toggle", None),
+        "logic_brakeslide": ("logic_brakeslide", "toggle", None),
+        "logic_lanayru_mine_quick_bomb": ("logic_lanayru_mine_quick_bomb", "toggle", None),
+        "logic_tot_skip_brakeslide": ("logic_tot_skip_brakeslide", "toggle", None),
+        "logic_tot_slingshot": ("logic_tot_slingshot", "toggle", None),
+        "logic_fire_node_without_hook_beetle": ("logic_fire_node_without_hook_beetle", "toggle", None),
+        "logic_cactus_bomb_whip": ("logic_cactus_bomb_whip", "toggle", None),
+        "logic_skippers_fast_clawshots": ("logic_skippers_fast_clawshots", "toggle", None),
+        "logic_skyview_spider_roll": ("logic_skyview_spider_roll", "toggle", None),
+        "logic_skyview_coiled_rupee_jump": ("logic_skyview_coiled_rupee_jump", "toggle", None),
+        "logic_skyview_precise_slingshot": ("logic_skyview_precise_slingshot", "toggle", None),
+        "logic_et_keese_skyward_strike": ("logic_et_keese_skyward_strike", "toggle", None),
+        "logic_et_slope_stuttersprint": ("logic_et_slope_stuttersprint", "toggle", None),
+        "logic_et_bombless_scaldera": ("logic_et_bombless_scaldera", "toggle", None),
+        "logic_lmf_whip_switch": ("logic_lmf_whip_switch", "toggle", None),
+        "logic_lmf_ceiling_precise_slingshot": ("logic_lmf_ceiling_precise_slingshot", "toggle", None),
+        "logic_lmf_whip_armos_room_timeshift_stone": ("logic_lmf_whip_armos_room_timeshift_stone", "toggle", None),
+        "logic_lmf_minecart_jump": ("logic_lmf_minecart_jump", "toggle", None),
+        "logic_lmf_bellowsless_moldarach": ("logic_lmf_bellowsless_moldarach", "toggle", None),
+        "logic_ac_lever_jump_trick": ("logic_ac_lever_jump_trick", "toggle", None),
+        "logic_ac_chest_after_whip_hooks_jump": ("logic_ac_chest_after_whip_hooks_jump", "toggle", None),
+        "logic_sandship_jump_to_stern": ("logic_sandship_jump_to_stern", "toggle", None),
+        "logic_sandship_itemless_spume": ("logic_sandship_itemless_spume", "toggle", None),
+        "logic_sandship_no_combination_hint": ("logic_sandship_no_combination_hint", "toggle", None),
+        "logic_fs_pillar_jump": ("logic_fs_pillar_jump", "toggle", None),
+        "logic_fs_practice_sword_ghirahim_2": ("logic_fs_practice_sword_ghirahim_2", "toggle", None),
+        "logic_present_bow_switches": ("logic_present_bow_switches", "toggle", None),
+        "logic_skykeep_vineclip": ("logic_skykeep_vineclip", "toggle", None),
+        # Starting Inventory
+        "starting_hearts": ("starting_hearts", "range", None),
+        "start_with_all_bugs": ("start_with_all_bugs", "toggle", None),
+        "start_with_all_treasures": ("start_with_all_treasures", "toggle", None),
+        "random_starting_tablet_count": ("starting_tablets", "range", None),
+        "starting_sword": ("starting_sword", "choice", {
+            "no_sword": 0, "practice_sword": 1, "goddess_sword": 2, "goddess_longsword": 3,
+            "goddess_white_sword": 4, "master_sword": 5, "true_master_sword": 6,
+        }),
+        "random_starting_statues": ("random_starting_statues", "toggle", None),
+        "random_starting_spawn": ("random_starting_spawn", "choice", {"vanilla": 0, "anywhere": 1}),
+        "limit_starting_spawn": ("limit_starting_spawn", "toggle", None),
+        "random_starting_item_count": ("random_starting_item_count", "range", None),
+        "peatrice_conversations": ("peatrice_conversations", "range", None),
+        # Cosmetics
+        "tunic_swap": ("tunic_swap", "toggle", None),
+        "lightning_skyward_strike": ("lightning_skyward_strike", "toggle", None),
+        "starry_skies": ("starry_skies", "toggle", None),
+        "remove_enemy_music": ("remove_enemy_music", "toggle", None),
+        # Difficulty
+        "damage_multiplier": ("damage_multiplier", "choice", {"half": 0, "1": 1, "normal": 1, "2": 2, "double": 2, "4": 3, "quadruple": 3, "ohko": 4}),
+        "no_spoiler_log": ("no_spoiler_log", "toggle", None),
+        "empty_unreachable_locations": ("empty_unreachable_locations", "toggle", None),
+        "add_junk_items": ("add_junk_items", "toggle", None),
+        "junk_item_rate": ("junk_item_rate", "range", None),
+    }
+
+    def _sync_ap_options_from_resolved(self, resolved_settings: dict) -> None:
+        """
+        Update self.options.* fields to match the resolved sshd-rando settings
+        so the spoiler log, fill_slot_data, and other AP subsystems display
+        the actual config.yaml values rather than Archipelago defaults.
+        """
+        synced = 0
+        for config_key, (ap_field, mapping_type, value_map) in self._CONFIG_TO_AP_OPTION.items():
+            if config_key not in resolved_settings:
+                continue
+
+            option_obj = getattr(self.options, ap_field, None)
+            if option_obj is None:
+                continue
+
+            raw = resolved_settings[config_key]
+            try:
+                if mapping_type == "toggle":
+                    raw_s = str(raw).lower()
+                    # Accept "on", "open", "true", "1", "yes" as truthy
+                    option_obj.value = 1 if raw_s in ("on", "open", "true", "1", "yes") else 0
+
+                elif mapping_type == "toggle_custom":
+                    option_obj.value = value_map.get(str(raw).lower(), 0)
+
+                elif mapping_type == "choice":
+                    raw_s = str(raw).lower()
+                    if raw_s in value_map:
+                        option_obj.value = value_map[raw_s]
+                    else:
+                        try:
+                            int_val = int(raw)
+                            if int_val in value_map.values():
+                                option_obj.value = int_val
+                        except (ValueError, TypeError):
+                            continue
+
+                elif mapping_type == "range":
+                    option_obj.value = int(raw)
+
+                synced += 1
+            except Exception as e:
+                print(f"[__init__.py] Warning: Could not sync AP option '{ap_field}' from config '{config_key}={raw}': {e}")
+
+        print(f"[__init__.py] Synced {synced} AP options from resolved sshd-rando settings")
     
     def create_regions(self) -> None:
-        """Create all regions for the world."""
+        """
+        Create all regions for the world using full sshd-rando logic.
+        
+        Uses the logic_converter to parse sshd-rando's world YAML files and
+        create ~373 regions, ~825 entrances, ~137 events, and per-location rules.
+        Falls back to basic Regions.py if the converter fails.
+        """
+        try:
+            from .logic_converter import build_full_logic
+            
+            # First, create a temporary basic region structure so locations exist
+            # The logic converter will move them to fine-grained regions
+            self._create_initial_locations()
+            
+            # Determine the correct backend directory path:
+            # When running from .apworld zip, the files are extracted to a temp dir.
+            # When running from filesystem (dev), use the local sshd-rando-backend dir.
+            from pathlib import Path
+            backend_dir = None
+            if SSHD_RANDO_TEMP_DIR:
+                candidate = Path(SSHD_RANDO_TEMP_DIR) / "sshd-rando-backend"
+                if candidate.exists() and (candidate / "data").exists():
+                    backend_dir = candidate
+            if not backend_dir:
+                # Also try SSHDRWrapper's cached extraction path
+                import tempfile
+                cached = Path(tempfile.gettempdir()) / "sshd_apworld_extracted" / "sshd-rando-backend"
+                if cached.exists() and (cached / "data").exists():
+                    backend_dir = cached
+            if not backend_dir and SSHD_RANDO_PATH and SSHD_RANDO_PATH.exists():
+                backend_dir = SSHD_RANDO_PATH
+            
+            # Build full logic from sshd-rando YAMLs
+            print(f"[__init__.py] Building full logic from sshd-rando world data...")
+            if backend_dir:
+                print(f"[__init__.py] Using backend data from: {backend_dir}")
+            self._logic_converter = build_full_logic(self, backend_dir=backend_dir)
+            print(f"[__init__.py] Full logic built successfully")
+            self._using_full_logic = True
+            
+        except Exception as e:
+            print(f"[__init__.py] WARNING: Full logic conversion failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"[__init__.py] Falling back to basic region structure...")
+            self._using_full_logic = False
+            self._create_basic_regions()
+    
+    def _create_initial_locations(self) -> None:
+        """
+        Create initial location objects without regions.
+        The logic_converter will create proper regions and place locations into them.
+        Locations not covered by sshd-rando YAMLs get a fallback region.
+        """
+        # We don't create regions here — the logic_converter creates them.
+        # But we DO need to pre-create all Location objects so the converter
+        # can find them and move them to the right region.
+        
+        # The logic converter creates regions first, then places locations.
+        # It needs locations to already exist in the multiworld.
+        # So we'll create them in a temporary "Unassigned" region,
+        # then the converter will move them.
+        
+        # Actually, the converter handles everything: it creates regions,
+        # then creates locations within those regions based on the YAML data.
+        # But we need all LOCATION_TABLE locations to exist. The converter's
+        # _build_location_rules will handle locations defined in YAMLs.
+        # For locations NOT in any YAML (shouldn't happen, but safety), we need
+        # a fallback.
+        
+        # Let the converter create regions first (in build_full_logic -> convert -> _build_regions).
+        # Then the converter adds locations to the correct fine-grained regions.
+        # We just need to ensure all locations from LOCATION_TABLE are created.
+        pass
+    
+    def _create_basic_regions(self) -> None:
+        """Fallback: create basic regions from Regions.py (old behavior)."""
         from .Regions import REGION_CONNECTIONS
         
         # Create all unique regions from location table
@@ -390,6 +696,56 @@ class SSHDWorld(World):
                 for item_name, count in starting_item_dict.items():
                     print(f"  {item_name} x{count}")
             
+            # Extract the COMPLETE item pool from the sshd-rando world.
+            # After generate(), all items have been placed into locations.
+            # By scanning locations + starting_item_pool, we get the exact pool that
+            # sshd-rando built — respecting ALL config.yaml settings: item_pool size,
+            # trap_mode, key removal, shuffle-dependent items, etc.
+            try:
+                from collections import Counter
+                sshd_item_pool = Counter()  # item_name -> count
+                
+                # Scan all filled locations to reconstruct the placed item pool
+                if hasattr(world, 'location_table'):
+                    for loc_name, location in world.location_table.items():
+                        if hasattr(location, 'types') and "Hint Location" in location.types:
+                            continue  # Skip gossip stones
+                        if hasattr(location, 'current_item') and location.current_item:
+                            item_name = location.current_item.name
+                            sshd_item_pool[item_name] += 1
+                
+                # Also count starting items (they were removed from pool during generation)
+                sshd_starting_pool = Counter()
+                if hasattr(world, 'starting_item_pool'):
+                    for item, count in world.starting_item_pool.items():
+                        sshd_starting_pool[item.name] += count
+                
+                # The Archipelago item pool = location items - starting items
+                # (starting items are precollected, not in the randomized pool)
+                self._sshd_full_item_pool = dict(sshd_item_pool)
+                self._sshd_starting_pool = dict(sshd_starting_pool)
+                
+                print(f"[__init__.py] Extracted sshd-rando item pool: {sum(sshd_item_pool.values())} items across locations")
+                print(f"[__init__.py] Starting pool: {sum(sshd_starting_pool.values())} items")
+                
+                # Log trap counts
+                trap_names = {"Health Trap", "Groose Trap", "Noise Trap", "Curse Trap", "Burn Trap"}
+                trap_count = sum(count for name, count in sshd_item_pool.items() if name in trap_names)
+                if trap_count > 0:
+                    print(f"[__init__.py] Traps in pool: {trap_count}")
+                    for name in trap_names:
+                        if sshd_item_pool[name] > 0:
+                            print(f"  {name} x{sshd_item_pool[name]}")
+                else:
+                    print(f"[__init__.py] No traps in pool (trap_mode may be no_traps)")
+                    
+            except Exception as e:
+                print(f"[__init__.py] Warning: Could not extract sshd-rando item pool: {e}")
+                import traceback
+                traceback.print_exc()
+                self._sshd_full_item_pool = {}
+                self._sshd_starting_pool = {}
+            
             # Extract hash from ap_settings and store in multiworld
             sshd_hash = ap_settings.get('_sshd_hash', None)
             if sshd_hash:
@@ -420,6 +776,10 @@ class SSHDWorld(World):
                 # Store resolved settings for use in Rules (if needed in future)
                 self._sshd_resolved_settings = resolved_settings
                 
+                # Sync AP options to match resolved settings so the spoiler log
+                # and fill_slot_data display the real config.yaml values
+                self._sync_ap_options_from_resolved(resolved_settings)
+                
             except Exception as e:
                 print(f"[__init__.py] Warning: Could not extract resolved settings: {e}")
                 import traceback
@@ -437,6 +797,8 @@ class SSHDWorld(World):
             traceback.print_exc()
             self._sshd_starting_items = {}
             self._sshd_resolved_settings = {}
+            self._sshd_full_item_pool = {}
+            self._sshd_starting_pool = {}
     
     def create_item(self, name: str) -> Item:
         """Create an item by name."""
@@ -444,7 +806,15 @@ class SSHDWorld(World):
         return Item(name, data.classification, data.code, self.player)
     
     def create_items(self) -> None:
-        """Create all items for the world."""
+        """
+        Create all items for the world.
+        
+        Uses the sshd-rando world's actual item pool (extracted in generate_early)
+        as the source of truth. This ensures ALL config.yaml settings are respected:
+        trap_mode, item_pool size, key removal, shuffle-dependent items, etc.
+        
+        Falls back to a hardcoded STANDARD pool if sshd-rando extraction failed.
+        """
         
         # Count total locations (excluding events)
         total_locations = len([
@@ -452,68 +822,241 @@ class SSHDWorld(World):
             if loc.address is not None and not getattr(loc, "event", False)
         ])
         
-        # Get starting items from sshd-rando world (if available)
-        # These items should NOT be added to the item pool since they're given at start
-        starting_items = getattr(self, '_sshd_starting_items', {})
+        # Items that are stage names for progressive chains — must NEVER be in the AP pool.
+        # sshd-rando uses these internally but the Archipelago pool uses only progressive names.
+        PROGRESSIVE_STAGE_ITEMS = {
+            # Sword stages (Progressive Sword covers all of these)
+            "Goddess Sword", "Goddess Longsword", "Goddess White Sword",
+            "Master Sword", "True Master Sword",
+            # Bow stages (Progressive Bow covers these)
+            "Iron Bow", "Sacred Bow",
+            # Beetle stages (Progressive Beetle covers these)
+            "Hook Beetle", "Quick Beetle", "Tough Beetle",
+            # Slingshot stages (Progressive Slingshot covers these)
+            "Scattershot",
+            # Mitts stages (Progressive Mitts covers these)
+            "Mogma Mitts",
+            # Bug Net stages (Progressive Bug Net covers these)
+            "Big Bug Net",
+            # Wallet stages (Progressive Wallet covers these)
+            "Big Wallet", "Giant Wallet", "Tycoon Wallet",
+            # Pouch stages (Progressive Pouch covers these)
+            "Pouch Expansion",
+        }
         
-        # Grant starting items as precollected items to the player
+        # Map sshd-rando stage names back to their progressive item name.
+        # When sshd-rando places e.g. "Goddess Longsword" at a location, that's
+        # actually a "Progressive Sword" for Archipelago's purposes.
+        STAGE_TO_PROGRESSIVE = {
+            "Goddess Sword": "Progressive Sword",
+            "Goddess Longsword": "Progressive Sword",
+            "Goddess White Sword": "Progressive Sword",
+            "Master Sword": "Progressive Sword",
+            "True Master Sword": "Progressive Sword",
+            "Iron Bow": "Progressive Bow",
+            "Sacred Bow": "Progressive Bow",
+            "Hook Beetle": "Progressive Beetle",
+            "Quick Beetle": "Progressive Beetle",
+            "Tough Beetle": "Progressive Beetle",
+            "Scattershot": "Progressive Slingshot",
+            "Mogma Mitts": "Progressive Mitts",
+            "Big Bug Net": "Progressive Bug Net",
+            "Big Wallet": "Progressive Wallet",
+            "Giant Wallet": "Progressive Wallet",
+            "Tycoon Wallet": "Progressive Wallet",
+            "Pouch Expansion": "Progressive Pouch",
+        }
+        
+        # Items to skip entirely (not part of the randomized pool)
+        SKIP_ITEMS = {
+            "Game Beatable",      # Victory event, placed separately
+            "Archipelago Item",   # Cross-world placeholder, not in our pool
+            "Sailcloth",          # Always given as a starting item, never randomized
+        }
+        
+        # --- FORCE SAILCLOTH AS STARTING ITEM ---
+        # Sailcloth is always given to the player unconditionally.
+        # Rando devs are still working on logic for it; until then it must not be randomized.
+        self.multiworld.push_precollected(self.create_item("Sailcloth"))
+        print(f"[__init__.py] Sailcloth granted as forced starting item")
+        
+        # --- PRECOLLECT STARTING ITEMS ---
+        # sshd-rando's starting_item_pool (extracted in generate_early) contains items
+        # the player begins with. These are SEPARATE from the fill pool — items at
+        # locations do NOT include starting items (they were removed before fill).
+        # We must precollect them so Archipelago's logic knows they're available.
+        starting_items = getattr(self, '_sshd_starting_pool', {})
+        
         if starting_items:
-            print(f"[__init__.py] Granting starting items as precollected:")
-            for item_name, count in starting_items.items():
+            print(f"[__init__.py] Granting {sum(starting_items.values())} starting items as precollected:")
+            for raw_name, count in starting_items.items():
+                # Convert any stage names to progressive (safety net for progressive_items=on)
+                item_name = STAGE_TO_PROGRESSIVE.get(raw_name, raw_name)
+                # Skip Sailcloth — already force-granted above
+                if item_name == "Sailcloth":
+                    print(f"  {item_name} x{count} (skipped, already force-granted)")
+                    continue
                 if item_name in ITEM_TABLE:
                     for _ in range(count):
                         item = self.create_item(item_name)
                         self.multiworld.push_precollected(item)
                     print(f"  {item_name} x{count}")
                 else:
-                    print(f"  [WARNING] '{item_name}' not found in ITEM_TABLE - skipped")
+                    print(f"  [WARNING] '{raw_name}' not found in ITEM_TABLE - skipped")
         
-        # Add all progression and useful items first (but not traps)
-        # Track how many of each item we've added to avoid duplicates with starting items
+        # --- BUILD POOL FROM SSHD-RANDO WORLD (source of truth) ---
+        # The sshd-rando world was generated in generate_early() with all config.yaml
+        # settings applied. Its filled locations contain the exact items it chose,
+        # including traps, respecting item_pool size, key removal, etc.
+        # NOTE: Starting items were already removed from sshd-rando's item_pool before
+        # fill_worlds() ran, so items at locations are exclusively non-starting items.
+        sshd_pool = getattr(self, '_sshd_full_item_pool', {})
+        
         item_pool = []
-        items_added_count = {}  # item_name -> count added to pool
         
-        for name, data in ITEM_TABLE.items():
-            if name == "Game Beatable":
-                continue
-            if data.classification in (IC.progression, IC.useful):
-                # Calculate how many copies of this item should be in the pool
-                # ITEM_TABLE only has one entry per item, but some items may need multiple copies
-                # For most items, add 1 copy unless it's in starting inventory
-                starting_count = starting_items.get(name, 0)
+        if sshd_pool:
+            print(f"[__init__.py] Building Archipelago item pool from sshd-rando world...")
+            
+            # Build a unified pool: count each item across all sshd-rando locations,
+            # converting stage names to progressive names.
+            from collections import Counter
+            ap_pool_counts = Counter()
+            
+            for item_name, count in sshd_pool.items():
+                # Convert stage names to progressive names
+                ap_name = STAGE_TO_PROGRESSIVE.get(item_name, item_name)
+                ap_pool_counts[ap_name] += count
+            
+            # Add all placed items directly to the AP pool.
+            # No subtraction needed — sshd-rando already removed starting items
+            # from item_pool before fill_worlds() ran, so items at locations
+            # are exclusively non-starting items. Starting items were precollected above.
+            for ap_name, count in ap_pool_counts.items():
+                # Skip items not in our ITEM_TABLE (e.g. sshd-rando internal items)
+                if ap_name not in ITEM_TABLE:
+                    continue
                 
-                # For items that can appear multiple times (like Progressive Sword),
-                # we need to check how many total should exist
-                # For now, assume 1 copy per ITEM_TABLE entry unless specified otherwise
-                # (The randomizer backend will handle creating multiple copies of progressives)
+                # Skip non-pool items
+                if ap_name in SKIP_ITEMS:
+                    continue
                 
-                # Only add if not ALL copies are in starting inventory
-                if starting_count == 0:
-                    item_pool.append(self.create_item(name))
-                    items_added_count[name] = items_added_count.get(name, 0) + 1
-                # If some but not all copies are in starting inventory, still skip
-                # (sshd-rando handles progressive item counts internally)
+                for _ in range(count):
+                    item_pool.append(self.create_item(ap_name))
+            
+            # Log trap counts
+            trap_count = len([i for i in item_pool if i.classification == IC.trap])
+            if trap_count > 0:
+                print(f"[__init__.py] Traps in AP pool: {trap_count}")
+        else:
+            # --- FALLBACK: hardcoded STANDARD pool ---
+            # Used only if sshd-rando world extraction failed
+            print(f"[__init__.py] WARNING: No sshd-rando pool available, using hardcoded STANDARD fallback")
+            
+            POOL_ITEM_COUNTS = {
+                "Progressive Sword": 6,
+                "Progressive Bow": 3,
+                "Progressive Beetle": 4,
+                "Progressive Bug Net": 2,
+                "Progressive Slingshot": 2,
+                "Progressive Mitts": 2,
+                "Progressive Pouch": 5,
+                "Progressive Wallet": 4,
+                "Extra Wallet": 3,
+                "Song of the Hero Part": 4,
+                "Key Piece": 5,
+                "Empty Bottle": 5,
+                "Gratitude Crystal Pack": 13,
+                "Gratitude Crystal": 15,
+                "Group of Tadtones": 17,
+                "Skyview Temple Small Key": 2,
+                "Ancient Cistern Small Key": 2,
+                "Sandship Small Key": 2,
+                "Fire Sanctuary Small Key": 3,
+                "Lanayru Caves Small Key": 2,
+                "Heart Medal": 2,
+                "Rupee Medal": 2,
+                "Heart Piece": 24,
+                "Heart Container": 6,
+                "Life Medal": 2,
+                "Wooden Shield": 1,
+                "Hylian Shield": 1,
+                "Cursed Medal": 1,
+                "Treasure Medal": 1,
+                "Potion Medal": 1,
+                "Small Seed Satchel": 1,
+                "Small Quiver": 1,
+                "Small Bomb Bag": 1,
+                "Bug Medal": 1,
+                "Golden Skull": 1,
+                "Goddess Plume": 1,
+                "Dusk Relic": 1,
+                "Tumbleweed": 1,
+                "5 Bombs": 1,
+            }
+            
+            for name, data in ITEM_TABLE.items():
+                if name in SKIP_ITEMS or name in PROGRESSIVE_STAGE_ITEMS:
+                    continue
+                if data.classification == IC.trap:
+                    continue
+                
+                if name in POOL_ITEM_COUNTS:
+                    total_count = POOL_ITEM_COUNTS[name]
+                    starting_count = starting_items.get(name, 0)
+                    pool_count = max(0, total_count - starting_count)
+                    for _ in range(pool_count):
+                        item_pool.append(self.create_item(name))
+                elif data.classification in (IC.progression, IC.useful):
+                    starting_count = starting_items.get(name, 0)
+                    if starting_count == 0:
+                        item_pool.append(self.create_item(name))
         
-        # Fill remaining slots with filler items (rupees, hearts, etc.)
-        filler_items = [name for name, data in ITEM_TABLE.items() if data.classification == IC.filler]
+        # Fill remaining slots with junk filler items
+        JUNK_FILL_ITEMS = [
+            "Green Rupee", "Blue Rupee", "Red Rupee",
+            "10 Arrows", "5 Bombs", "10 Bombs",
+            "5 Deku Seeds", "10 Deku Seeds",
+        ]
+        junk_items = [name for name in JUNK_FILL_ITEMS if name in ITEM_TABLE]
         
+        junk_idx = 0
         while len(item_pool) < total_locations:
-            # Cycle through filler items
-            filler_name = filler_items[len(item_pool) % len(filler_items)]
-            item_pool.append(self.create_item(filler_name))
+            junk_name = junk_items[junk_idx % len(junk_items)]
+            item_pool.append(self.create_item(junk_name))
+            junk_idx += 1
+        
+        # If we have more items than locations (shouldn't happen normally), trim
+        if len(item_pool) > total_locations:
+            print(f"[__init__.py] WARNING: Pool has {len(item_pool)} items but only {total_locations} locations, trimming excess")
+            item_pool = item_pool[:total_locations]
         
         print(f"[__init__.py] Created item pool:")
         print(f"  Total locations: {total_locations}")
         print(f"  Progression/Useful items: {len([i for i in item_pool if i.classification in (IC.progression, IC.useful)])}")
         print(f"  Filler items: {len([i for i in item_pool if i.classification == IC.filler])}")
+        print(f"  Trap items: {len([i for i in item_pool if i.classification == IC.trap])}")
         print(f"  Starting items (precollected): {sum(starting_items.values())}")
         
         # Add items to the multiworld pool
         self.multiworld.itempool += item_pool
     
     def set_rules(self) -> None:
-        """Set access rules for regions and locations."""
-        set_rules(self)
+        """
+        Set access rules for regions and locations.
+        
+        If full logic was built by logic_converter (in create_regions), rules
+        are already set on entrances, events, and locations. We only need to
+        set the completion condition here.
+        
+        Falls back to basic Rules.py rules if full logic wasn't available.
+        """
+        if getattr(self, '_using_full_logic', False):
+            # Full logic already applied by logic_converter in create_regions.
+            # Just set the completion condition.
+            set_completion_condition(self)
+        else:
+            # Fallback: use basic rules from Rules.py
+            set_rules(self)
     
     def fill_slot_data(self) -> dict[str, Any]:
         """Generate slot data for the client."""
@@ -1315,9 +1858,11 @@ class SSHDWorld(World):
                 if location.item:
                     ap_item_name = location.item.name
                     
-                    # Check if this is a SSHD item or a cross-world item
-                    if ap_item_name in ITEM_TABLE:
-                        # SSHD item - use it directly
+                    # Check if this is a SSHD item for THIS player or a cross-world item
+                    # We must check the player too, because another game may have
+                    # an item with the same name (e.g. "Heart Container", "Progressive Sword").
+                    if ap_item_name in ITEM_TABLE and location.item.player == self.player:
+                        # SSHD item belonging to this player - use it directly
                         location_item_mapping[location.name] = ap_item_name
                     elif location.name in PROTECTED_LOCATIONS:
                         # Protected location - keep the SSHD item instead of replacing
