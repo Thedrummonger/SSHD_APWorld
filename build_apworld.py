@@ -23,6 +23,17 @@ BUNDLED_PACKAGES = [
 ]
 
 
+import re
+
+# Regex matching CPython ABI-tagged extension filenames on any platform.
+# e.g.  _version.cp313-win_amd64.pyd  →  groups("_version", ".pyd")
+#       nlzss11.cpython-313-x86_64-linux-gnu.so  →  groups("nlzss11", ".so")
+_EXT_TAG_RE = re.compile(
+    r'^(?P<base>.+?)\.(?:cpython-|cp)\d+[^.]*(?P<ext>\.pyd|\.so)$',
+    re.IGNORECASE,
+)
+
+
 def _find_package_files(package_name: str):
     """Locate all files belonging to a Python package/module.
 
@@ -32,6 +43,13 @@ def _find_package_files(package_name: str):
 
     Handles both single-file modules (``nlzss11.pyd``) and package
     directories (``lz4/``).
+
+    For every C-extension file with a version-tagged name (e.g.
+    ``_block.cp313-win_amd64.pyd``), an *additional* entry with the
+    **untagged** name (``_block.pyd``) is emitted.  Python's import
+    machinery checks the untagged name as a fallback, which lets the
+    bundled extension load even when the host Python minor-version
+    differs from the build environment.
     """
     spec = importlib.util.find_spec(package_name)
     if spec is None:
@@ -39,6 +57,16 @@ def _find_package_files(package_name: str):
 
     results = []
     origin = spec.origin  # e.g. …/lz4/__init__.py  or  …/nlzss11.cp313-win_amd64.pyd
+
+    def _add_with_fallback(abs_path: str, rel_path: str):
+        """Append *rel_path* and, if it is a tagged extension, also the untagged name."""
+        results.append((abs_path, rel_path))
+        fname = rel_path.rsplit("/", 1)[-1] if "/" in rel_path else rel_path
+        m = _EXT_TAG_RE.match(fname)
+        if m:
+            untagged = m.group("base") + m.group("ext")
+            dir_part = rel_path[: len(rel_path) - len(fname)]  # preserves "lz4/block/"
+            results.append((abs_path, dir_part + untagged))
 
     if spec.submodule_search_locations:
         # It's a package directory – walk the whole tree
@@ -51,12 +79,12 @@ def _find_package_files(package_name: str):
                 if fname.endswith(".pyc"):
                     continue
                 full = Path(root) / fname
-                rel = full.relative_to(parent_dir)
-                results.append((str(full), str(rel).replace("\\", "/")))
+                rel = str(full.relative_to(parent_dir)).replace("\\", "/")
+                _add_with_fallback(str(full), rel)
     elif origin:
         # Single-file module (e.g. a .pyd or .py)
         full = Path(origin)
-        results.append((str(full), full.name))
+        _add_with_fallback(str(full), full.name)
 
     return results
 
