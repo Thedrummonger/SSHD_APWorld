@@ -425,16 +425,20 @@ def generate_sshd_rando_mod(settings_dict: Dict[str, Any], output_dir: Path, see
     except ImportError as e:
         error_msg = (
             "\n═══════════════════════════════════════════════════════════════\n"
-            "ERROR: Required module 'lz4' is not installed!\n"
+            "ERROR: Required module 'lz4' could not be loaded!\n"
             "═══════════════════════════════════════════════════════════════\n\n"
-            "The SSHD Archipelago world requires the 'lz4' Python package.\n\n"
-            "TO FIX: Open PowerShell/Command Prompt as ADMINISTRATOR and run:\n\n"
-            "    pip install lz4\n\n"
-            "Then restart Archipelago and try again.\n"
+            "The lz4 package should be bundled inside the .apworld file.\n"
+            "If you see this error the .apworld was not built correctly.\n\n"
+            "Rebuild with:  python build_apworld.py\n"
+            "(make sure 'pip install lz4' has been run in the build environment first)\n"
             "═══════════════════════════════════════════════════════════════\n"
         )
         print(error_msg)
-        raise Exception(f"Missing required dependency: lz4. Please install it with 'pip install lz4'") from e
+        raise Exception(
+            "Missing required dependency: lz4. "
+            "The .apworld may not have been built with bundled dependencies. "
+            "Rebuild with build_apworld.py after running 'pip install lz4'."
+        ) from e
     
     # Initialize sshd-rando imports (lazy load)
     _initialize_sshd_rando()

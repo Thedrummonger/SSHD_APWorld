@@ -10,7 +10,55 @@ import zipfile
 import shutil
 import sys
 import site
+import importlib.util
 from pathlib import Path
+
+
+# Third-party Python packages to bundle into the apworld.
+# These will be extracted at runtime so C-extensions (.pyd/.so) work correctly.
+# Each entry is a top-level package/module name that will be located via importlib.
+BUNDLED_PACKAGES = [
+    "lz4",       # Compression (C extension) – used by asmpatchhandler
+    "nlzss11",   # Nintendo LZ compression (C extension) – used by sslib/u8file
+]
+
+
+def _find_package_files(package_name: str):
+    """Locate all files belonging to a Python package/module.
+
+    Returns a list of (absolute_path, archive_relative_path) tuples where
+    archive_relative_path is relative to the ``_bundled_deps`` directory
+    inside the apworld zip (e.g. ``lz4/__init__.py``).
+
+    Handles both single-file modules (``nlzss11.pyd``) and package
+    directories (``lz4/``).
+    """
+    spec = importlib.util.find_spec(package_name)
+    if spec is None:
+        return []
+
+    results = []
+    origin = spec.origin  # e.g. …/lz4/__init__.py  or  …/nlzss11.cp313-win_amd64.pyd
+
+    if spec.submodule_search_locations:
+        # It's a package directory – walk the whole tree
+        pkg_dir = Path(spec.submodule_search_locations[0])
+        parent_dir = pkg_dir.parent
+        for root, _dirs, files in os.walk(pkg_dir):
+            # Skip __pycache__ directories
+            _dirs[:] = [d for d in _dirs if d != "__pycache__"]
+            for fname in files:
+                if fname.endswith(".pyc"):
+                    continue
+                full = Path(root) / fname
+                rel = full.relative_to(parent_dir)
+                results.append((str(full), str(rel).replace("\\", "/")))
+    elif origin:
+        # Single-file module (e.g. a .pyd or .py)
+        full = Path(origin)
+        results.append((str(full), full.name))
+
+    return results
 
 
 def build_apworld():
@@ -209,6 +257,21 @@ def build_apworld():
                     apworld.write(filepath, arcname)
                     print(f"  Added: {arcname}")
                     file_count += 1
+        
+        # ------------------------------------------------------------------
+        # Bundle third-party Python packages (including C extensions)
+        # ------------------------------------------------------------------
+        print("Bundling third-party Python dependencies...")
+        for pkg_name in BUNDLED_PACKAGES:
+            pkg_files = _find_package_files(pkg_name)
+            if not pkg_files:
+                print(f"  WARNING: package '{pkg_name}' not found – skipping")
+                continue
+            for abs_path, rel_path in pkg_files:
+                arcname = Path("sshd") / "_bundled_deps" / rel_path
+                apworld.write(abs_path, arcname)
+                print(f"  Added: {arcname}")
+                file_count += 1
     
     print()
     print(f"Successfully built SSHD.apworld with {file_count} files!")

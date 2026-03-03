@@ -80,34 +80,41 @@ SSHD_RANDO_TEMP_DIR = None  # Will hold temp directory if extracted from zip
 if hasattr(sys.modules[__name__], '__loader__') and hasattr(sys.modules[__name__].__loader__, 'archive'):
     # Running from .apworld zip - need to extract to temp directory
     # because sshd-rando-backend uses file I/O operations that don't work on zip contents
+    # and C-extension packages (.pyd/.so) cannot be imported from inside a zip.
     apworld_path = Path(sys.modules[__name__].__loader__.archive)
     
     # Create temp directory for extraction
     SSHD_RANDO_TEMP_DIR = tempfile.mkdtemp(prefix="sshd_rando_")
     temp_backend_path = Path(SSHD_RANDO_TEMP_DIR) / "sshd-rando-backend"
+    temp_deps_path = Path(SSHD_RANDO_TEMP_DIR) / "_bundled_deps"
     
-    # Extract sshd-rando-backend from the zip
+    # Extract sshd-rando-backend AND _bundled_deps from the zip
+    _EXTRACT_PREFIXES = ('sshd/sshd-rando-backend/', 'sshd/_bundled_deps/')
     with zipfile.ZipFile(apworld_path, 'r') as zip_file:
-        # Extract all files from sshd/sshd-rando-backend/
         for file_info in zip_file.filelist:
-            if file_info.filename.startswith('sshd/sshd-rando-backend/'):
-                # Remove 'sshd/' prefix to get relative path within sshd-rando-backend
-                relative_path = file_info.filename[5:]  # Remove 'sshd/'
-                if relative_path == 'sshd-rando-backend/' or relative_path == 'sshd-rando-backend':
-                    continue  # Skip the directory itself
-                
-                target_path = Path(SSHD_RANDO_TEMP_DIR) / relative_path
-                
-                # Create parent directories
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Extract the file
-                if not file_info.is_dir():
-                    with zip_file.open(file_info.filename) as source:
-                        with open(target_path, 'wb') as target:
-                            target.write(source.read())
+            if not any(file_info.filename.startswith(p) for p in _EXTRACT_PREFIXES):
+                continue
+            # Remove 'sshd/' prefix to get relative path
+            relative_path = file_info.filename[5:]  # Remove 'sshd/'
+            # Skip bare directory entries
+            if relative_path.rstrip('/') in ('sshd-rando-backend', '_bundled_deps'):
+                continue
+            
+            target_path = Path(SSHD_RANDO_TEMP_DIR) / relative_path
+            
+            # Create parent directories
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Extract the file
+            if not file_info.is_dir():
+                with zip_file.open(file_info.filename) as source:
+                    with open(target_path, 'wb') as target:
+                        target.write(source.read())
     
-    # Add temp directory to path
+    # Add bundled deps to path FIRST so they take priority
+    if temp_deps_path.exists():
+        sys.path.insert(0, str(temp_deps_path))
+    # Then add sshd-rando-backend
     sys.path.insert(0, str(temp_backend_path))
     SSHD_RANDO_AVAILABLE = True
     
