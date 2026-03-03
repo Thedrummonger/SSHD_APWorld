@@ -16,7 +16,14 @@ try:
 except ImportError:
     RANDO_ROOT_PATH = Path(os.path.dirname(os.path.realpath(__file__)))
 
-if platform.system() == "Darwin":
+# --- Archipelago override ---------------------------------------------------
+# When running inside Archipelago, the wrapper sets these env vars BEFORE this
+# module is first imported so that all module-level path constants resolve to
+# the correct absolute locations rather than being relative to CWD.
+_ap_userdata = os.environ.get("SSHD_AP_USERDATA_PATH")
+if _ap_userdata:
+    userdata_path = _ap_userdata
+elif platform.system() == "Darwin":
     userdata_path = platformdirs.user_data_dir(
         "Skyward Sword HD Randomizer", "SSHD Rando"
     )
@@ -28,7 +35,13 @@ if platform.system() == "Darwin":
         f"You are running from source on macOS. Currently, macOS builds cannot reliably access data from the local directory, so, to keep things consistent, your data, such as all default paths and config, can be found at {userdata_path}"
     )
 
-SSHD_EXTRACT_PATH = Path(userdata_path) / "sshd_extract"
+# Allow the extract path to be overridden independently (the wrapper computes
+# this from the player's YAML extract_path option).
+_ap_extract = os.environ.get("SSHD_AP_EXTRACT_PATH")
+if _ap_extract:
+    SSHD_EXTRACT_PATH = Path(_ap_extract)
+else:
+    SSHD_EXTRACT_PATH = Path(userdata_path) / "sshd_extract"
 EXEFS_EXTRACT_PATH = SSHD_EXTRACT_PATH / "exefs"
 ROMFS_EXTRACT_PATH = SSHD_EXTRACT_PATH / "romfs"
 OTHER_MODS_PATH = Path(userdata_path) / "other_mods"

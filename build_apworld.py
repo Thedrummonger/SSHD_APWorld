@@ -11,54 +11,77 @@ import shutil
 import sys
 import site
 import importlib.util
+import subprocess
+import tempfile
+import re
 from pathlib import Path
 
 
 # Third-party Python packages to bundle into the apworld.
 # These will be extracted at runtime so C-extensions (.pyd/.so) work correctly.
-# Each entry is a top-level package/module name that will be located via importlib.
+# Each entry is a top-level package/module name.
 BUNDLED_PACKAGES = [
     "lz4",       # Compression (C extension) – used by asmpatchhandler
     "nlzss11",   # Nintendo LZ compression (C extension) – used by sslib/u8file
 ]
 
+# Python versions to download wheels for (covers all Archipelago releases).
+# Wheels for each version contain ABI-tagged .pyd files that can coexist.
+BUNDLE_PYTHON_VERSIONS = ["311", "312", "313"]
 
-def _find_package_files(package_name: str):
-    """Locate all files belonging to a Python package/module.
+# Platform to download wheels for.
+BUNDLE_PLATFORM = "win_amd64"
 
-    Returns a list of (absolute_path, archive_relative_path) tuples where
-    archive_relative_path is relative to the ``_bundled_deps`` directory
-    inside the apworld zip (e.g. ``lz4/__init__.py``).
 
-    Handles both single-file modules (``nlzss11.pyd``) and package
-    directories (``lz4/``).
+def _download_and_stage_wheels(packages: list[str], staging_dir: Path):
+    """Download wheels for *packages* across multiple Python versions and
+    extract their contents into *staging_dir*.
+
+    Files from different Python versions have distinct ABI-tagged names
+    (e.g. ``_block.cp312-win_amd64.pyd`` vs ``_block.cp313-win_amd64.pyd``)
+    so they can safely coexist in the same directory.  At runtime Python's
+    import machinery picks the one that matches the running interpreter.
     """
-    spec = importlib.util.find_spec(package_name)
-    if spec is None:
-        return []
+    staging_dir.mkdir(parents=True, exist_ok=True)
 
-    results = []
-    origin = spec.origin  # e.g. …/lz4/__init__.py  or  …/nlzss11.cp313-win_amd64.pyd
-
-    if spec.submodule_search_locations:
-        # It's a package directory – walk the whole tree
-        pkg_dir = Path(spec.submodule_search_locations[0])
-        parent_dir = pkg_dir.parent
-        for root, _dirs, files in os.walk(pkg_dir):
-            # Skip __pycache__ directories
-            _dirs[:] = [d for d in _dirs if d != "__pycache__"]
-            for fname in files:
-                if fname.endswith(".pyc"):
+    with tempfile.TemporaryDirectory(prefix="sshd_wheels_") as wheel_tmpdir:
+        for pyver in BUNDLE_PYTHON_VERSIONS:
+            ver_dir = Path(wheel_tmpdir) / pyver
+            ver_dir.mkdir()
+            for pkg in packages:
+                print(f"  Downloading {pkg} for cp{pyver} {BUNDLE_PLATFORM} ...")
+                try:
+                    subprocess.check_call(
+                        [
+                            sys.executable, "-m", "pip", "download",
+                            pkg,
+                            "--python-version", pyver,
+                            "--platform", BUNDLE_PLATFORM,
+                            "--only-binary", ":all:",
+                            "--no-deps",
+                            "-d", str(ver_dir),
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                    )
+                except subprocess.CalledProcessError:
+                    print(f"    WARNING: no wheel for {pkg} cp{pyver} – skipping")
                     continue
-                full = Path(root) / fname
-                rel = full.relative_to(parent_dir)
-                results.append((str(full), str(rel).replace("\\", "/")))
-    elif origin:
-        # Single-file module (e.g. a .pyd or .py)
-        full = Path(origin)
-        results.append((str(full), full.name))
 
-    return results
+        # Now extract all downloaded wheels into the staging directory.
+        # Skip .dist-info metadata – we only need the actual package files.
+        for whl_file in Path(wheel_tmpdir).rglob("*.whl"):
+            print(f"  Extracting {whl_file.name} ...")
+            with zipfile.ZipFile(whl_file) as whl:
+                for entry in whl.filelist:
+                    # Skip dist-info metadata
+                    if ".dist-info/" in entry.filename or entry.filename.endswith(".dist-info"):
+                        continue
+                    target = staging_dir / entry.filename
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if not entry.is_dir():
+                        with whl.open(entry.filename) as src, open(target, "wb") as dst:
+                            dst.write(src.read())
 
 
 def build_apworld():
@@ -260,18 +283,26 @@ def build_apworld():
         
         # ------------------------------------------------------------------
         # Bundle third-party Python packages (including C extensions)
+        # Downloads wheels for multiple Python versions so the .pyd files
+        # work regardless of which CPython the host Archipelago ships.
         # ------------------------------------------------------------------
         print("Bundling third-party Python dependencies...")
-        for pkg_name in BUNDLED_PACKAGES:
-            pkg_files = _find_package_files(pkg_name)
-            if not pkg_files:
-                print(f"  WARNING: package '{pkg_name}' not found – skipping")
-                continue
-            for abs_path, rel_path in pkg_files:
-                arcname = Path("sshd") / "_bundled_deps" / rel_path
-                apworld.write(abs_path, arcname)
-                print(f"  Added: {arcname}")
-                file_count += 1
+        with tempfile.TemporaryDirectory(prefix="sshd_staging_") as staging_tmp:
+            staging_dir = Path(staging_tmp)
+            _download_and_stage_wheels(BUNDLED_PACKAGES, staging_dir)
+
+            # Walk the staging directory and add everything to the zip
+            for root, _dirs, files in os.walk(staging_dir):
+                _dirs[:] = [d for d in _dirs if d != "__pycache__"]
+                for fname in files:
+                    if fname.endswith(".pyc"):
+                        continue
+                    full = Path(root) / fname
+                    rel = full.relative_to(staging_dir)
+                    arcname = Path("sshd") / "_bundled_deps" / str(rel).replace("\\", "/")
+                    apworld.write(full, arcname)
+                    print(f"  Added: {arcname}")
+                    file_count += 1
     
     print()
     print(f"Successfully built SSHD.apworld with {file_count} files!")

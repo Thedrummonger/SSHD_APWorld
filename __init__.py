@@ -111,11 +111,28 @@ if hasattr(sys.modules[__name__], '__loader__') and hasattr(sys.modules[__name__
                     with open(target_path, 'wb') as target:
                         target.write(source.read())
     
-    # Add bundled deps to path FIRST so they take priority
-    if temp_deps_path.exists():
-        sys.path.insert(0, str(temp_deps_path))
-    # Then add sshd-rando-backend
+    # Add sshd-rando-backend at highest priority.
     sys.path.insert(0, str(temp_backend_path))
+
+    # Add bundled deps right after the backend.  The _bundled_deps directory
+    # contains .pyd files for multiple Python versions (cp311, cp312, cp313)
+    # so the correct one is picked by importlib regardless of host version.
+    if temp_deps_path.exists():
+        sys.path.insert(1, str(temp_deps_path))
+        # On Windows 3.8+, explicitly register the DLL search directory so
+        # that any native extension (.pyd) and its transitive DLL deps can
+        # be loaded from the temp extraction path.
+        if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(str(temp_deps_path))
+            except OSError:
+                pass
+
+    # Flush Python's import-finder caches so the freshly extracted
+    # directories are recognised immediately.
+    import importlib
+    importlib.invalidate_caches()
+
     SSHD_RANDO_AVAILABLE = True
     
     # Register cleanup function to delete temp directory on exit
@@ -582,11 +599,10 @@ class SSHDWorld(World):
                 if candidate.exists() and (candidate / "data").exists():
                     backend_dir = candidate
             if not backend_dir:
-                # Also try SSHDRWrapper's cached extraction path
-                import tempfile
-                cached = Path(tempfile.gettempdir()) / "sshd_apworld_extracted" / "sshd-rando-backend"
-                if cached.exists() and (cached / "data").exists():
-                    backend_dir = cached
+                # Check SSHDRWrapper's resolved path (it scans sys.path + filesystem)
+                from .SSHDRWrapper import SSHD_RANDO_PATH as _wrapper_rando_path
+                if _wrapper_rando_path and _wrapper_rando_path.exists() and (_wrapper_rando_path / "data").exists():
+                    backend_dir = _wrapper_rando_path
             if not backend_dir and SSHD_RANDO_PATH and SSHD_RANDO_PATH.exists():
                 backend_dir = SSHD_RANDO_PATH
             

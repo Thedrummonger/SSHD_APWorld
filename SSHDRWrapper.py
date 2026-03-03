@@ -15,98 +15,43 @@ import zipfile
 import random
 from typing import Tuple, Dict, Any
 
-# Detect if we're running from within an .apworld ZIP file or filesystem
-# Don't change directory during import - do it lazily when needed
-# Try multiple potential locations for sshd-rando
+# ---------------------------------------------------------------------------
+# Detect sshd-rando-backend.
+#
+# When loaded from an .apworld, __init__.py has ALREADY extracted sshd-rando-
+# backend (and _bundled_deps) into a temp directory and inserted them into
+# sys.path.  We look there first so we never create a competing extraction.
+# ---------------------------------------------------------------------------
 
-def _extract_sshd_rando_from_zip():
-    """Extract sshd-rando-backend from apworld ZIP to a temporary location if needed."""
-    current_file = Path(__file__).resolve()
-    
-    # Check if we're running from within a ZIP file (.apworld)
-    current_file_str = str(current_file)
-    if '.apworld' in current_file_str or '.zip' in current_file_str:
-        # We're in a ZIP - need to extract sshd-rando-backend
-        try:
-            # Find the ZIP file path
-            if '.apworld' in current_file_str:
-                zip_path_parts = current_file_str.split('.apworld')
-                zip_path = Path(zip_path_parts[0] + '.apworld')
-            else:
-                zip_path_parts = current_file_str.split('.zip')
-                zip_path = Path(zip_path_parts[0] + '.zip')
-            
-            if zip_path.exists() and zipfile.is_zipfile(zip_path):
-                # Create a temp directory for extraction
-                temp_dir = Path(tempfile.gettempdir()) / "sshd_apworld_extracted"
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                
-                backend_dest = temp_dir / "sshd-rando-backend"
-                
-                # Only extract if not already extracted or if ZIP is newer
-                if not backend_dest.exists() or zip_path.stat().st_mtime > backend_dest.stat().st_mtime:
-                    # Extract sshd-rando-backend from ZIP
-                    with zipfile.ZipFile(zip_path, 'r') as zf:
-                        # Find all files under sshd/sshd-rando-backend/
-                        backend_files = [name for name in zf.namelist() 
-                                        if name.startswith('sshd/sshd-rando-backend/')]
-                        
-                        if backend_files:
-                            # Clean up old extraction
-                            if backend_dest.exists():
-                                shutil.rmtree(backend_dest)
-                            
-                            # Extract files
-                            for file_name in backend_files:
-                                # Remove 'sshd/' prefix to get relative path within backend
-                                relative_path = file_name[len('sshd/'):]
-                                target_path = temp_dir / relative_path
-                                
-                                # Create directories as needed
-                                if file_name.endswith('/'):
-                                    target_path.mkdir(parents=True, exist_ok=True)
-                                else:
-                                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                                    with zf.open(file_name) as source:
-                                        with open(target_path, 'wb') as target:
-                                            shutil.copyfileobj(source, target)
-                            
-                            print(f"[SSHDRWrapper] Extracted sshd-rando-backend from {zip_path.name} to {backend_dest}")
-                            return backend_dest
-                else:
-                    print(f"[SSHDRWrapper] Using cached sshd-rando-backend from {backend_dest}")
-                    return backend_dest
-        except Exception as e:
-            print(f"[SSHDRWrapper] Warning: Failed to extract sshd-rando-backend from ZIP: {e}")
-            import traceback
-            traceback.print_exc()
-    
+def _find_sshd_rando_on_sys_path():
+    """Check sys.path for an already-extracted sshd-rando-backend."""
+    for p in sys.path:
+        candidate = Path(p)
+        if candidate.name == "sshd-rando-backend" and candidate.is_dir():
+            if (candidate / "logic").is_dir() and (candidate / "constants").is_dir():
+                return candidate
     return None
+
 
 def _find_sshd_rando_path():
     """Find sshd-rando-backend directory, checking multiple locations."""
+    # 1) Already on sys.path (set by __init__.py extraction)
+    on_path = _find_sshd_rando_on_sys_path()
+    if on_path:
+        return on_path
+
+    # 2) Filesystem locations (development / manual install)
     current_file = Path(__file__).resolve()
-    
-    # First, try extracting from ZIP if we're in an apworld
-    extracted_path = _extract_sshd_rando_from_zip()
-    if extracted_path and extracted_path.exists():
-        if (extracted_path / "logic").exists() and (extracted_path / "constants").exists():
-            return extracted_path
-    
     potential_paths = [
-        current_file.parent / "sshd-rando-backend",  # Bundled in apworld: sshd/sshd-rando-backend/
-        current_file.parent.parent / "sshd-rando-backend",  # One level up
-        current_file.parent.parent / "sshd-rando",  # Development: adjacent to SSHD_APWorld
-        Path.home() / "sshd-rando",  # User's home directory (manual install)
+        current_file.parent / "sshd-rando-backend",
+        current_file.parent.parent / "sshd-rando-backend",
+        current_file.parent.parent / "sshd-rando",
+        Path.home() / "sshd-rando",
     ]
-    
     for path in potential_paths:
-        # Check if path exists and has expected subdirectories (logic/ and constants/)
-        if path.exists() and path.is_dir():
-            # Verify it's actually sshd-rando by checking for key directories
-            if (path / "logic").exists() and (path / "constants").exists():
-                return path
-    
+        if path.is_dir() and (path / "logic").is_dir() and (path / "constants").is_dir():
+            return path
+
     return None
 
 POTENTIAL_SSHD_RANDO_PATHS = [
@@ -116,7 +61,10 @@ POTENTIAL_SSHD_RANDO_PATHS = [
     Path.home() / "sshd-rando",
 ]
 
-SSHD_RANDO_PATH = _find_sshd_rando_path()
+# NOTE: Do NOT resolve at import time — __init__.py hasn't extracted
+# sshd-rando-backend from the .apworld zip yet when this module is first
+# imported.  Resolution is deferred to _initialize_sshd_rando().
+SSHD_RANDO_PATH = None
 
 CURRENT_DIR = Path(__file__).parent
 
@@ -125,41 +73,78 @@ _sshd_rando_initialized = False
 
 def _initialize_sshd_rando():
     """Lazy initialization of sshd-rando imports. Only called when actually generating."""
-    global _sshd_rando_initialized
+    global _sshd_rando_initialized, SSHD_RANDO_PATH
     
     if _sshd_rando_initialized:
         return
     
-    # Check if sshd-rando was found (only when we actually need it)
+    # Resolve path NOW (after __init__.py has extracted into temp and set sys.path)
+    if SSHD_RANDO_PATH is None:
+        SSHD_RANDO_PATH = _find_sshd_rando_path()
+        if SSHD_RANDO_PATH:
+            print(f"[SSHDRWrapper] Found sshd-rando-backend at: {SSHD_RANDO_PATH}")
+    
+    # Check if sshd-rando was found
     if SSHD_RANDO_PATH is None or not SSHD_RANDO_PATH.exists():
-        # Provide detailed debugging information
         current_file = Path(__file__).resolve()
-        debug_info = []
-        debug_info.append(f"Current file: {current_file}")
-        debug_info.append(f"Parent directory: {current_file.parent}")
-        
-        # List contents of parent directory
-        if current_file.parent.exists():
-            debug_info.append(f"Contents of {current_file.parent}:")
-            try:
-                for item in sorted(current_file.parent.iterdir()):
-                    item_type = "DIR " if item.is_dir() else "FILE"
-                    debug_info.append(f"  {item_type}: {item.name}")
-            except Exception as e:
-                debug_info.append(f"  Error listing directory: {e}")
-        
+        debug_info = [
+            f"Current file: {current_file}",
+            f"Parent directory: {current_file.parent}",
+            f"sys.path entries with 'sshd': {[p for p in sys.path if 'sshd' in p.lower()]}",
+        ]
         raise ImportError(
             f"sshd-rando not found. Searched in:\n" +
             "\n".join(f"  - {path} (exists: {path.exists()})" for path in POTENTIAL_SSHD_RANDO_PATHS) +
-            "\n\nDebug information:\n" +
+            "\n\nAlso checked sys.path for sshd-rando-backend directory.\n" +
             "\n".join(debug_info) +
             "\n\nPlease ensure sshd-rando-backend is installed in one of the searched locations."
         )
     
-    # Add sshd-rando to sys.path so we can import it
-    if str(SSHD_RANDO_PATH) not in sys.path:
-        sys.path.insert(0, str(SSHD_RANDO_PATH))
+    # ------------------------------------------------------------------
+    # Ensure the backend is at the FRONT of sys.path and flush the
+    # import-finder caches.  Without invalidate_caches(), Python may
+    # still resolve packages from an earlier snapshot of sys.path and
+    # fail to find 'randomizer' even though it now exists on disk.
+    # ------------------------------------------------------------------
+    backend_str = str(SSHD_RANDO_PATH)
+    if backend_str in sys.path:
+        sys.path.remove(backend_str)
+    sys.path.insert(0, backend_str)
     
+    # Also ensure _bundled_deps is near the top (right after backend)
+    for p in list(sys.path):
+        if p.endswith("_bundled_deps"):
+            sys.path.remove(p)
+            sys.path.insert(1, p)
+            break
+    
+    import importlib
+    importlib.invalidate_caches()
+    
+    # Verify the critical sub-package is reachable BEFORE anything
+    # tries to import it transitively (i.e. via logic.generate).
+    randomizer_init = SSHD_RANDO_PATH / "randomizer" / "__init__.py"
+    if not randomizer_init.is_file():
+        raise ImportError(
+            f"sshd-rando-backend is missing randomizer/__init__.py "
+            f"(looked in {SSHD_RANDO_PATH / 'randomizer'}). "
+            f"Contents: {list((SSHD_RANDO_PATH / 'randomizer').iterdir()) if (SSHD_RANDO_PATH / 'randomizer').is_dir() else 'DIR NOT FOUND'}"
+        )
+
+    # Force-import 'randomizer' from our backend so no stale/shadowed
+    # version from elsewhere can interfere.
+    import importlib.util
+    if "randomizer" in sys.modules:
+        del sys.modules["randomizer"]
+    spec = importlib.util.spec_from_file_location(
+        "randomizer",
+        str(randomizer_init),
+        submodule_search_locations=[str(SSHD_RANDO_PATH / "randomizer")],
+    )
+    randomizer_mod = importlib.util.module_from_spec(spec)
+    sys.modules["randomizer"] = randomizer_mod
+    spec.loader.exec_module(randomizer_mod)
+
     # Mock the GUI modules to avoid PySide6 dependency
     from unittest.mock import MagicMock
     
@@ -423,22 +408,69 @@ def generate_sshd_rando_mod(settings_dict: Dict[str, Any], output_dir: Path, see
     try:
         import lz4.block
     except ImportError as e:
+        # Gather diagnostic info for debugging
+        import importlib.machinery
+        diag_lines = [
+            f"Python version: {sys.version}",
+            f"Extension suffixes: {importlib.machinery.EXTENSION_SUFFIXES}",
+            f"sys.executable: {sys.executable}",
+        ]
+        # Check if bundled deps directory exists on sys.path
+        for p in sys.path:
+            if "_bundled_deps" in p:
+                diag_lines.append(f"Bundled deps path: {p} (exists={os.path.isdir(p)})")
+                lz4_dir = os.path.join(p, "lz4")
+                if os.path.isdir(lz4_dir):
+                    diag_lines.append(f"  lz4/ contents: {os.listdir(lz4_dir)}")
+                    block_dir = os.path.join(lz4_dir, "block")
+                    if os.path.isdir(block_dir):
+                        diag_lines.append(f"  lz4/block/ contents: {os.listdir(block_dir)}")
+                else:
+                    diag_lines.append(f"  lz4/ directory: NOT FOUND")
+        diag_str = "\n".join(diag_lines)
         error_msg = (
             "\n═══════════════════════════════════════════════════════════════\n"
             "ERROR: Required module 'lz4' could not be loaded!\n"
             "═══════════════════════════════════════════════════════════════\n\n"
             "The lz4 package should be bundled inside the .apworld file.\n"
-            "If you see this error the .apworld was not built correctly.\n\n"
+            "If you see this error the .apworld was not built correctly,\n"
+            "or the bundled extensions don't match your Python version.\n\n"
+            f"Diagnostics:\n{diag_str}\n\n"
             "Rebuild with:  python build_apworld.py\n"
             "(make sure 'pip install lz4' has been run in the build environment first)\n"
             "═══════════════════════════════════════════════════════════════\n"
         )
         print(error_msg)
         raise Exception(
-            "Missing required dependency: lz4. "
-            "The .apworld may not have been built with bundled dependencies. "
-            "Rebuild with build_apworld.py after running 'pip install lz4'."
+            f"Missing required dependency: lz4 ({type(e).__name__}: {e}). "
+            f"Python {sys.version_info.major}.{sys.version_info.minor}. "
+            "The .apworld may not have the right binary for this Python version."
         ) from e
+    
+    # ------------------------------------------------------------------
+    # Determine extract_path BEFORE any sshd-rando modules are imported
+    # so that filepathconstants.py picks up the correct absolute paths.
+    # ------------------------------------------------------------------
+    try:
+        from platform_utils import get_default_sshd_extract_path
+        default_path = str(get_default_sshd_extract_path())
+    except ImportError:
+        default_path = "C:\\ProgramData\\Archipelago\\sshd_extract"
+    extract_path = Path(settings_dict.get("extract_path", default_path)).resolve()
+    
+    # Set env vars that our patched filepathconstants.py reads at import time.
+    # SSHD_AP_EXTRACT_PATH  → overrides SSHD_EXTRACT_PATH (the romfs/exefs root)
+    # SSHD_AP_USERDATA_PATH → overrides userdata_path (cache, output, config dirs)
+    os.environ["SSHD_AP_EXTRACT_PATH"] = str(extract_path)
+    os.environ["SSHD_AP_USERDATA_PATH"] = str(extract_path.parent)
+    print(f"[SSHDRWrapper] Extract path: {extract_path}")
+    print(f"[SSHDRWrapper] Userdata path: {extract_path.parent}")
+    
+    # If filepathconstants was already imported (e.g. multi-world), force
+    # a reload so the new env vars take effect on all module-level constants.
+    if "filepathconstants" in sys.modules:
+        import importlib
+        importlib.reload(sys.modules["filepathconstants"])
     
     # Initialize sshd-rando imports (lazy load)
     _initialize_sshd_rando()
@@ -446,13 +478,7 @@ def generate_sshd_rando_mod(settings_dict: Dict[str, Any], output_dir: Path, see
     from patches.allpatchhandler import AllPatchHandler
     from logic.config import write_config_to_file
     
-    # Check if romfs is extracted (use extract_path from settings_dict)
-    try:
-        from platform_utils import get_default_sshd_extract_path
-        default_path = str(get_default_sshd_extract_path())
-    except ImportError:
-        default_path = "C:\\ProgramData\\Archipelago\\sshd_extract"
-    extract_path = Path(settings_dict.get("extract_path", default_path))
+    # Check if romfs is extracted
     romfs_path = extract_path / "romfs"
     
     if not romfs_path.exists():
@@ -547,6 +573,28 @@ def generate_sshd_rando_mod(settings_dict: Dict[str, Any], output_dir: Path, see
         print(f"[SSHDRWrapper] DEBUG: Config file seed field: {config_data.get('seed', 'NOT SET')}")
     except Exception as e:
         print(f"[SSHDRWrapper] DEBUG: Could not read config seed: {e}")
+    
+    # ---------------------------------------------------------------
+    # Ensure the sshd-rando preferences file has the correct absolute
+    # output_dir.  generate() -> load_config_from_file() -> load_preferences()
+    # reads output_dir from a SEPARATE preferences.yaml.  If that file
+    # is missing, stale, or relative, generate() will error out.
+    # ---------------------------------------------------------------
+    try:
+        import filepathconstants as _fpc
+        import yaml as _yaml
+        _prefs_path = Path(_fpc.PREFERENCES_PATH)
+        _prefs_path.parent.mkdir(parents=True, exist_ok=True)
+        _prefs_data = {}
+        if _prefs_path.is_file():
+            with open(_prefs_path, 'r', encoding='utf-8') as _f:
+                _prefs_data = _yaml.safe_load(_f) or {}
+        _prefs_data['output_dir'] = output_dir.as_posix()
+        with open(_prefs_path, 'w', encoding='utf-8') as _f:
+            _yaml.safe_dump(_prefs_data, _f, sort_keys=False)
+        print(f"[SSHDRWrapper] Wrote preferences output_dir: {output_dir.as_posix()}")
+    except Exception as _e:
+        print(f"[SSHDRWrapper] WARNING: Could not write preferences.yaml: {_e}")
     
     # Generate world (location placement logic)
     # Pass config_file path - generate() will read and use it
