@@ -2,7 +2,7 @@ name: Build APWorld
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'fix-*' ]
     tags:
       - 'v*'
   pull_request:
