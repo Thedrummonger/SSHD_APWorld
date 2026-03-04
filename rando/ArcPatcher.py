@@ -8,7 +8,7 @@ to show Archipelago branding instead of the original randomizer logo.
 from pathlib import Path
 
 
-def patch_archipelago_logo(romfs_output_path: Path, assets_path: Path, title2d_source: Path, endroll_source: Path):
+def patch_archipelago_logo(romfs_output_path: Path, assets_path: Path, title2d_source: Path, endroll_source: Path, use_alt_logo: bool = False):
     """
     Patch the title screen and credits to show the Archipelago logo.
     
@@ -17,6 +17,7 @@ def patch_archipelago_logo(romfs_output_path: Path, assets_path: Path, title2d_s
         assets_path: Path to the assets folder containing TPL files
         title2d_source: Path to the source Title2D.arc file
         endroll_source: Path to the source EndRoll.arc file
+        use_alt_logo: If True, use the alternative Archipelago logo files
     """
     # Import sslib here so __init__.py has already added sshd-rando-backend to sys.path
     try:
@@ -34,11 +35,15 @@ def patch_archipelago_logo(romfs_output_path: Path, assets_path: Path, title2d_s
     logo_data = None
     rogo_03_data = None
     rogo_04_data = None
-
-    # adding '_alt' before the '.tpl' extention would switch it to the alternate logo
-    logo_tpl_filename = 'archipelago-logo.tpl'
-    rogo_03_tpl_filename = 'archipelago-rogo_03.tpl'
-    rogo_04_tpl_filename = 'archipelago-rogo_04.tpl'
+    
+    # Select logo filenames based on whether the alternative logo is enabled
+    alt_suffix = '_alt' if use_alt_logo else ''
+    logo_tpl_filename = f'archipelago-logo{alt_suffix}.tpl'
+    rogo_03_tpl_filename = f'archipelago-rogo_03{alt_suffix}.tpl'
+    rogo_04_tpl_filename = f'archipelago-rogo_04{alt_suffix}.tpl'
+    
+    if use_alt_logo:
+        print("[ArcPatcher] Using alternative Archipelago logo")
     
     # Try method 1: importlib.resources (best for ZIP files, Python 3.9+)
     try:
