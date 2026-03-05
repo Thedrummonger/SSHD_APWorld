@@ -928,6 +928,19 @@ class SSHDWorld(World):
                     for item, count in world.starting_item_pool.items():
                         sshd_starting_pool[item.name] += count
                 
+                # Debug: log the tablet-related setting value from the generated world
+                if hasattr(world, 'setting_map') and world.setting_map:
+                    _sm = world.setting_map.settings
+                    _tc = _sm.get('random_starting_tablet_count')
+                    if _tc:
+                        print(f"[__init__.py] DEBUG: world random_starting_tablet_count = {_tc.value!r}")
+                
+                # Debug: log each starting item
+                if sshd_starting_pool:
+                    print(f"[__init__.py] Starting pool breakdown:")
+                    for item_name, count in sorted(sshd_starting_pool.items()):
+                        print(f"  {item_name} x{count}")
+                
                 # The Archipelago item pool = location items - starting items
                 # (starting items are precollected, not in the randomized pool)
                 self._sshd_full_item_pool = dict(sshd_item_pool)
@@ -2288,6 +2301,19 @@ class SSHDWorld(World):
             # Non-progressive items would break the item pool and cause mismatches
             settings_dict["progressive_items"] = "on"
             
+            # NOTE: Starting inventory settings (starting_sword, random_starting_tablet_count,
+            # starting_hearts, random_starting_item_count, random_starting_statues, etc.)
+            # are loaded from config.yaml above and are NOT overridden here.
+            # When a user provides config_yaml_path, the config.yaml is authoritative
+            # for gameplay settings. Users should set these values in their config.yaml
+            # (e.g. random_starting_tablet_count: '0') rather than in the AP YAML.
+            
+            # Debug: log the starting inventory settings that came from config.yaml
+            _tablet_val = settings_dict.get("random_starting_tablet_count", "NOT SET")
+            _sword_val = settings_dict.get("starting_sword", "NOT SET")
+            _hearts_val = settings_dict.get("starting_hearts", "NOT SET")
+            print(f"[__init__.py] Config.yaml starting settings: tablets={_tablet_val!r}, sword={_sword_val!r}, hearts={_hearts_val!r}")
+            
             print("[__init__.py] Applied overrides: skip_demise=off, all hints disabled, spawn_hearts=on, progressive_items=on")
             
             return settings_dict
@@ -2513,8 +2539,17 @@ class SSHDWorld(World):
             print("[Cheats] Infinite Materials enabled - start_with_all_treasures forced to 'on'")
 
         # Starting Inventory
-        settings_dict["starting_tablets"] = self.options.starting_tablets.value
-        settings_dict["starting_sword"] = self.options.starting_sword.value
+        settings_dict["random_starting_tablet_count"] = str(self.options.starting_tablets.value)
+        
+        # Map AP option index to sshd-rando option name for starting_sword
+        sword_index_to_name = {
+            0: "no_sword", 1: "practice_sword", 2: "goddess_sword",
+            3: "goddess_longsword", 4: "goddess_white_sword",
+            5: "master_sword", 6: "true_master_sword",
+        }
+        settings_dict["starting_sword"] = sword_index_to_name.get(
+            self.options.starting_sword.value, "goddess_sword"
+        )
         settings_dict["random_starting_statues"] = "on" if self.options.random_starting_statues.value else "off"
         
         spawn_map = {0: "vanilla", 1: "anywhere"}

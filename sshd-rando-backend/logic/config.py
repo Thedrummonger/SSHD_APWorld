@@ -283,6 +283,11 @@ def load_config_from_file(
                 else:
                     setting_value = config_in[world_num_str][setting_name]
 
+                    # YAML may deserialize numeric strings (e.g. "0") as int.
+                    # Coerce to str so the lookup against info.options succeeds.
+                    if not isinstance(setting_value, str):
+                        setting_value = str(setting_value)
+
                     if setting_value not in settings_info[setting_name].options:
                         if default_on_invalid_value:
                             rewrite_config = True

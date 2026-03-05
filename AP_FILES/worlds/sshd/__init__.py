@@ -410,7 +410,7 @@ class SSHDWorld(World):
                                                 self.options.cutoff_game_over_music.value)
             
             # Starting Inventory
-            sshd_world.setting_map.set_setting("starting_tablets",
+            sshd_world.setting_map.set_setting("random_starting_tablet_count",
                                                 self.options.starting_tablets.value)
             sshd_world.setting_map.set_setting("starting_sword",
                                                 self.options.starting_sword.value)

@@ -317,23 +317,6 @@ def create_sshd_rando_config(settings_dict: Dict[str, Any], output_dir: Path, se
                 print(f"[SSHDRWrapper] Processing mixed_entrance_pools from config.yaml ({len(mixed_pools)} pools)")
                 setting_map.mixed_entrance_pools = mixed_pools
     
-    # CRITICAL: Manually populate starting_inventory for starting_tablets and starting_sword
-    # The sshd-rando backend uses setting_map.starting_inventory, NOT the settings directly
-    # Handle starting_tablets (directly add to starting_inventory)
-    # NOTE: Only do this if we're using Archipelago YAML settings (not from config.yaml)
-    if "starting_tablets" in settings_dict and "starting_inventory" not in settings_dict:
-        tablet_count = int(settings_dict["starting_tablets"])
-        # Randomize tablet selection for counts 1-2, use fixed order for 0 or 3
-        tablet_names = ["Emerald Tablet", "Ruby Tablet", "Amber Tablet"]
-        if tablet_count in [1, 2]:
-            # Randomly select tablets for 1 or 2
-            selected_tablets = random.sample(tablet_names, tablet_count)
-        else:
-            # Use sequential order for 0 or 3
-            selected_tablets = tablet_names[:tablet_count]
-        for tablet in selected_tablets:
-            setting_map.starting_inventory[tablet] = 1
-    
     # Handle starting_sword (add Progressive Sword based on level)
     # NOTE: Only do this if we're using Archipelago YAML settings (not from config.yaml)
     if "starting_sword" in settings_dict and "starting_inventory" not in settings_dict:
