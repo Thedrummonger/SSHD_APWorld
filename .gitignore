@@ -14,6 +14,8 @@ release/
 logs/
 cache/
 *.exe
+*.7z
+*.zip
 SSHD_Archipelago_Release.zip
 sshd-rando-backend/asm/additions/rust-additions/target/
 
@@ -54,3 +56,4 @@ compare_files.py
 
 # Rando stuff
 Skyward Sword HD Randomizer/
+preferences.yaml
