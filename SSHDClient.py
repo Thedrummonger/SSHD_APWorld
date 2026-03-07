@@ -1190,6 +1190,7 @@ class SSHDContext(CommonContext):
         self.checked_locations: Set[int] = set()
         self.sent_locations: Set[int] = set()  # Locations already sent to server
         self.item_queue: list = []  # Items waiting to be given
+        self._item_retry_after: float = 0.0  # Earliest time to retry a failed item delivery
         self.location_to_item: Dict[str, Dict] = {}  # Maps location names to item info from patch
         self.item_to_location: Dict[int, int] = {}  # Maps item code -> location code for tracking
         self.slot_data: dict = {}  # Slot data from server containing location-to-item mapping
@@ -1961,63 +1962,83 @@ class SSHDContext(CommonContext):
             
             # Give queued items to player
             if self.item_queue:
-                item_data = self.item_queue[0]
-                
-                # Start-inventory items (precollected) are already baked into the
-                # game save by sshd-rando patches.  We must NOT give them again via
-                # the memory buffer, but we DO need to advance the progressive
-                # counter so that future progressive items resolve to the right tier.
-                if item_data.get("is_start_inventory", False):
-                    item_name = item_data["name"]
-                    if item_name in self.progressive_counts:
-                        self.progressive_counts[item_name] += 1
-                        logger.debug(f"[StartInventory] Tracked {item_name} progressive count -> {self.progressive_counts[item_name]}")
-                    logger.debug(f"[StartInventory] Skipped in-game delivery of {item_name} (already in save from patches)")
-                    self.item_queue.pop(0)
-                    self.delivered_item_count += 1
-                    self.save_progress()
-                    self.update_tracker_state()
-                elif self.give_item_to_player(item_data["name"], item_data["id"]):
-                    # Successfully gave item
-                    player_name = item_data.get("player_name", "another player")
-                    location_name = item_data.get("location", "unknown location")
-                    is_own_item = (item_data.get("location_player") == self.slot)
-                    
-                    if not is_own_item:
-                        # Received item from another player
-                        logger.info(f"Received {item_data['name']} from {player_name} ({location_name})")
-                    else:
-                        # Received own item
-                        logger.info(f"Received {item_data['name']} ({location_name})")
-                    
-                    # Clear retry counter on success
-                    item_data.pop("_retry_count", None)
-                    
-                    # Remove from queue and persist delivery count
-                    self.item_queue.pop(0)
-                    self.delivered_item_count += 1
-                    self.save_progress()
-                    
-                    # Update tracker with new item
-                    self.update_tracker_state()
+                # Respect retry cooldown to avoid busy-loop spam when player
+                # is in an animation or otherwise unable to receive items.
+                now = time.time()
+                if now < self._item_retry_after:
+                    pass  # Cooldown active — skip this tick
                 else:
-                    # Item delivery failed - track retries to avoid infinite loops
-                    MAX_ITEM_RETRIES = 50  # ~50 attempts × 5s timeout = ~4 min max
-                    retry_count = item_data.get("_retry_count", 0) + 1
-                    item_data["_retry_count"] = retry_count
+                    item_data = self.item_queue[0]
                     
-                    if retry_count >= MAX_ITEM_RETRIES:
+                    # Start-inventory items (precollected) are already baked into the
+                    # game save by sshd-rando patches.  We must NOT give them again via
+                    # the memory buffer, but we DO need to advance the progressive
+                    # counter so that future progressive items resolve to the right tier.
+                    if item_data.get("is_start_inventory", False):
                         item_name = item_data["name"]
-                        logger.error(
-                            f"[ItemDelivery] Giving up on {item_name} after {retry_count} attempts. "
-                            f"Item will be re-delivered on next reconnect."
-                        )
-                        # Move to back of queue instead of dropping forever,
-                        # so it can be retried after other items succeed
-                        # (which may fix the buffer address via cycling)
+                        if item_name in self.progressive_counts:
+                            self.progressive_counts[item_name] += 1
+                            logger.debug(f"[StartInventory] Tracked {item_name} progressive count -> {self.progressive_counts[item_name]}")
+                        logger.debug(f"[StartInventory] Skipped in-game delivery of {item_name} (already in save from patches)")
                         self.item_queue.pop(0)
-                        item_data["_retry_count"] = 0  # Reset for next round
-                        self.item_queue.append(item_data)
+                        self.delivered_item_count += 1
+                        self.save_progress()
+                        self.update_tracker_state()
+                    elif self.give_item_to_player(item_data["name"], item_data["id"]):
+                        # Successfully gave item
+                        player_name = item_data.get("player_name", "another player")
+                        location_name = item_data.get("location", "unknown location")
+                        is_own_item = (item_data.get("location_player") == self.slot)
+                        
+                        if not is_own_item:
+                            # Received item from another player
+                            logger.info(f"Received {item_data['name']} from {player_name} ({location_name})")
+                        else:
+                            # Received own item
+                            logger.info(f"Received {item_data['name']} ({location_name})")
+                        
+                        # Clear retry counter and cooldown on success
+                        item_data.pop("_retry_count", None)
+                        self._item_retry_after = 0.0
+                        
+                        # Remove from queue and persist delivery count
+                        self.item_queue.pop(0)
+                        self.delivered_item_count += 1
+                        self.save_progress()
+                        
+                        # Update tracker with new item
+                        self.update_tracker_state()
+                    else:
+                        # Item delivery failed — apply exponential backoff.
+                        # This prevents the ~60 Hz busy-loop spam when the
+                        # player is in an animation (0x78 ITEM_GET, etc.).
+                        MAX_ITEM_RETRIES = 200  # generous limit before cycling
+                        retry_count = item_data.get("_retry_count", 0) + 1
+                        item_data["_retry_count"] = retry_count
+                        
+                        # Exponential backoff: 0.25s → 0.5s → 1.0s → 2.0s (cap)
+                        delay = min(0.25 * (2 ** min(retry_count - 1, 3)), 2.0)
+                        self._item_retry_after = time.time() + delay
+                        
+                        # Throttle log messages: only log every 10th retry
+                        if retry_count == 1 or retry_count % 10 == 0:
+                            logger.debug(
+                                f"[ItemDelivery] Failed to give {item_data['name']} "
+                                f"(attempt {retry_count}, next retry in {delay:.2f}s)"
+                            )
+                        
+                        if retry_count >= MAX_ITEM_RETRIES:
+                            item_name = item_data["name"]
+                            logger.error(
+                                f"[ItemDelivery] Giving up on {item_name} after {retry_count} attempts. "
+                                f"Item will be re-delivered on next reconnect."
+                            )
+                            # Move to back of queue instead of dropping forever,
+                            # so it can be retried after other items succeed
+                            # (which may fix the buffer address via cycling)
+                            self.item_queue.pop(0)
+                            item_data["_retry_count"] = 0  # Reset for next round
+                            self.item_queue.append(item_data)
             
             # Check for death (for death link)
             current_health = self.memory.read_short(OFFSET_CURRENT_HEALTH)

@@ -268,36 +268,20 @@ class GameItemSystem:
         if play_jingle:
             flags |= 0x02
         
-        # Write to buffer
+        # Write to buffer ATOMICALLY using a single 16-bit write.
+        # The Rust game loop checks item_id != 0 to trigger processing.
+        # If we write item_id and flags as separate byte writes, the game
+        # can process (and clear) the slot between the two writes, causing
+        # a race condition where Python thinks the write failed but the
+        # game already gave the item — leading to item duplication.
         buffer_offset = self.buffer_addr + (slot * GameOffsets.ARCHIPELAGO_BUFFER_SLOT_SIZE)
-        if not self.memory.write_byte(buffer_offset, item_id):
-            logger.error(f"Failed to write item ID to buffer slot {slot}")
+        slot_value = item_id | (flags << 8)  # little-endian: [item_id, flags]
+        if not self.memory.write_short(buffer_offset, slot_value):
+            logger.error(f"Failed to write item {item_id} to buffer slot {slot}")
             return False
         
-        if not self.memory.write_byte(buffer_offset + 1, flags):
-            logger.error(f"Failed to write flags to buffer slot {slot}")
-            return False
-        
-        # Read back to verify the write actually stuck.
-        # There is a small race window where the Rust main-loop can process
-        # and clear the slot between our write and readback.  If readback_id
-        # is 0 but we just wrote a non-zero value, the write was likely lost
-        # (wrong buffer address, game not loaded, etc.).  We treat this as a
-        # failure so the caller retries.
-        readback_id = self.memory.read_byte(buffer_offset)
-        readback_flags = self.memory.read_byte(buffer_offset + 1)
-        logger.info(f"Wrote item {item_id} to buffer slot {slot} with flags {flags:02x} (readback: id={readback_id}, flags={readback_flags:02x})")
+        logger.info(f"Wrote item {item_id} to buffer slot {slot} with flags {flags:02x}")
         logger.info(f"Buffer address: base+0x{self.buffer_addr:x} = 0x{self.memory.base_address + self.buffer_addr:x}")
-
-        if readback_id != item_id:
-            logger.warning(
-                f"Readback mismatch: wrote item_id={item_id}, read back {readback_id}. "
-                f"Buffer may be stale or incorrect — will retry."
-            )
-            # Clear the slot to be safe
-            self.memory.write_byte(buffer_offset, 0)
-            self.memory.write_byte(buffer_offset + 1, 0)
-            return False
         
         # Wait for game to process (buffer cleared when done)
         success = self._wait_for_item_processed(buffer_offset, expected_item_id=item_id)
@@ -385,48 +369,123 @@ class GameItemSystem:
             buffer_offset: Absolute offset into process memory for this slot
             expected_item_id: The item_id we wrote; used to detect a failed write.
         """
-        # --- First poll: verify the item is actually in the buffer ----------
-        # If the very first read already shows item_id == 0 AND the expected
-        # id was non-zero, the write never reached the game buffer (wrong
-        # buffer address, race condition, etc.).  Report failure so the
-        # caller can retry rather than silently losing the item.
-        first_id = self.memory.read_byte(buffer_offset)
-        first_flags = self.memory.read_byte(buffer_offset + 1)
-        logger.info(f"[POLL FRAME 0] Buffer slot: item_id={first_id}, flags={first_flags:02x}")
+        # --- Race-condition handling -----------------------------------------
+        # The game's Rust loop processes the buffer every frame (~16ms) on a
+        # SEPARATE THREAD.  There is an inherent race window where the game
+        # can read our write, process the item, and clear the slot BEFORE
+        # Python gets to read it back.  When that happens, item_id == 0 on
+        # the very first poll — which looks identical to "the write never
+        # landed".
+        #
+        # Because all buffer-delivered items have show_animation + play_jingle
+        # flags set (0x03), the game ALWAYS enters ITEM_GET (action 0x78)
+        # when it processes an item.  We use this as the primary evidence
+        # that the game consumed our write even though the slot is already
+        # cleared:
+        #
+        #   1. If we ever see our expected item_id in the slot, the write
+        #      definitely worked.  Keep polling until cleared → success.
+        #   2. If the slot is zero, check the player's current action:
+        #        a) Player is in ITEM_GET (0x78) → game processed it → success.
+        #        b) Buffer magic signature ("AP\x00\x01") at slot 0 is still
+        #           intact (fallback) → we're on the real buffer, the game
+        #           must have cleared it → success.
+        #   3. If neither check passes by the end of the grace period, the
+        #      write was genuinely lost (wrong buffer, stale memory) → retry.
+        #
+        # This eliminates the old false-negative race that caused item
+        # duplication: the game would process the item, Python would think
+        # the write failed, and the retry would give a second copy.
+        GRACE_FRAMES = 4  # ~67ms at 60 FPS — enough for the game loop
 
-        if first_id == 0 and expected_item_id != 0:
-            # The slot is already empty before the game had a chance to run a
-            # single frame.  This almost certainly means the write was lost.
-            logger.warning(
-                f"Buffer slot was empty on first poll (expected item {expected_item_id}). "
-                f"Write may have been lost — will retry."
-            )
-            return False
+        ever_saw_item = False
 
-        if first_id == 0:
-            logger.info("Item processed after 0 frames")
-            return True
-
-        # --- Normal polling loop (frames 1+) --------------------------------
-        for frame in range(1, self.timeout_frames):
-            time.sleep(1.0 / 60.0)  # ~60 FPS
-            
+        for frame in range(self.timeout_frames):
             item_id = self.memory.read_byte(buffer_offset)
             flags = self.memory.read_byte(buffer_offset + 1)
-            
+
             if frame < 5:
                 logger.info(f"[POLL FRAME {frame}] Buffer slot: item_id={item_id}, flags={flags:02x}")
-            
+
+            if item_id == expected_item_id and expected_item_id != 0:
+                ever_saw_item = True
+
             if item_id == 0:
-                # Buffer cleared - item was processed by the game
-                logger.info(f"Item processed after {frame} frames")
-                return True
-        
+                if ever_saw_item:
+                    # Normal path: we saw our item, now it's cleared → success
+                    logger.info(f"Item processed after {frame} frames")
+                    return True
+
+                if frame <= GRACE_FRAMES:
+                    # Slot is empty but we're within the grace window.
+                    # Check corroborating evidence before concluding.
+
+                    # Evidence A: player entered ITEM_GET animation
+                    try:
+                        action_offset = GameOffsets.PLAYER + GameOffsets.PLAYER_CURRENT_ACTION
+                        current_action = self.memory.read_int(action_offset)
+                        if current_action == 0x78:  # ITEM_GET
+                            logger.info(
+                                f"Item processed after {frame} frames (player in ITEM_GET)"
+                            )
+                            return True
+                    except Exception:
+                        pass
+
+                    if frame == GRACE_FRAMES:
+                        # Evidence B: buffer magic signature is intact, proving
+                        # we're pointed at the real game buffer.  An empty
+                        # slot on the real buffer means the game cleared it.
+                        if self._verify_buffer_magic():
+                            logger.info(
+                                f"Item processed after {frame} frames "
+                                f"(buffer magic valid, slot cleared by game)"
+                            )
+                            return True
+
+                        # Magic invalid → we're pointed at stale/wrong memory.
+                        logger.warning(
+                            f"Buffer slot empty for {frame} frames and magic "
+                            f"signature invalid. Buffer address may be stale "
+                            f"— will retry."
+                        )
+                        return False
+
+                    # Still within grace window — wait one frame and re-check
+                    time.sleep(1.0 / 60.0)
+                    continue
+
+                # Past grace period and we never saw our item — shouldn't
+                # normally reach here (grace period returns), but guard anyway.
+                logger.warning(
+                    f"Buffer slot empty for {frame} frames with no evidence "
+                    f"of processing. Write of item {expected_item_id} was "
+                    f"likely lost — will retry."
+                )
+                return False
+
+            # item_id is non-zero (either our item or stale data) — keep waiting
+            time.sleep(1.0 / 60.0)
+
         logger.error(f"Item processing timeout after {self.timeout_frames} frames")
-        # Clear BOTH item_id and flags to fully reset the slot
-        self.memory.write_byte(buffer_offset, 0)      # item_id
-        self.memory.write_byte(buffer_offset + 1, 0)   # flags
+        # Clear the slot fully so stale data doesn't block future writes
+        self.memory.write_short(buffer_offset, 0)
         return False
+    
+    def _verify_buffer_magic(self) -> bool:
+        """Check if the Archipelago buffer magic signature is still valid.
+        
+        The first 4 bytes of the buffer should always be 'AP\\x00\\x01'.
+        If this is intact, we know self.buffer_addr points at the real
+        game buffer (not stale/deallocated memory).
+        """
+        if not self.buffer_addr:
+            return False
+        try:
+            magic = self.memory.read_bytes(self.buffer_addr, 4)
+            return magic == bytes([0x41, 0x50, 0x00, 0x01])
+        except Exception:
+            return False
     
     def _is_player_ready(self) -> bool:
         """Check if player is in valid state to receive items.
@@ -504,7 +563,7 @@ class GameItemSystem:
             return
         for slot in range(GameOffsets.ARCHIPELAGO_BUFFER_SIZE):
             buffer_offset = self.buffer_addr + (slot * GameOffsets.ARCHIPELAGO_BUFFER_SLOT_SIZE)
-            # Write 4 zero bytes to clear the slot
-            for i in range(GameOffsets.ARCHIPELAGO_BUFFER_SLOT_SIZE):
-                self.memory.write_byte(buffer_offset + i, 0)
+            # Write 4 zero bytes to clear the slot (two 16-bit writes)
+            self.memory.write_short(buffer_offset, 0)
+            self.memory.write_short(buffer_offset + 2, 0)
         logger.info("Cleared Archipelago item buffer")
