@@ -1785,9 +1785,11 @@ class SSHDContext(CommonContext):
         if is_progressive:
             count = next_count
             if item_name == "Progressive Sword":
-                # Tier 1-4: Goddess Longsword → White Sword → Master Sword → True Master Sword
-                sword_tiers = ["Goddess Longsword", "Goddess White Sword", "Master Sword", "True Master Sword"]
-                actual_item_name = sword_tiers[min(count - 1, 3)]
+                # 6 tiers: Practice → Goddess → Longsword → White → Master → True Master
+                # Tier 1 uses "Progressive Sword" because that's the ITEM_TABLE
+                # name for game_id 10 (the Practice Sword).
+                sword_tiers = ["Progressive Sword", "Goddess Sword", "Goddess Longsword", "Goddess White Sword", "Master Sword", "True Master Sword"]
+                actual_item_name = sword_tiers[min(count - 1, 5)]
                 logger.debug(f"Progressive Sword #{count} -> {actual_item_name}")
             elif item_name == "Progressive Bow":
                 # Tier 1: base Bow (game item 19), 2: Iron Bow, 3: Sacred Bow

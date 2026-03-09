@@ -8,6 +8,7 @@ use crate::event;
 use crate::fix;
 use crate::flag;
 use crate::math;
+use crate::mem;
 use crate::player;
 use crate::savefile;
 use crate::settings;
@@ -150,6 +151,16 @@ extern "C" {
         model_name: *const c_char,
         model_path: *const c_char,
     ) -> *mut c_void;
+    fn dRawArcTable_c__getArcOrLoadFromDisk(
+        arc_table: *mut mem::ArcEntryTable,
+        arc_name: *const c_char,
+        parent_dir_name: *const c_char,
+        heap: *mut mem::Heap,
+    ) -> bool;
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
+
+    static ARC_MGR: *mut mem::ArcMgr;
+    static WORK2_HEAP: *mut mem::Heap;
 }
 
 // IMPORTANT: when adding functions here that need to get called from the game,
@@ -1426,42 +1437,267 @@ pub extern "C" fn resolve_progressive_item_models(
     }
 }
 
-// Helper function to get fallback models for items without defined models.
-// Returns an ObjectPack archive name that is guaranteed to be loaded in every
-// stage.  For items whose real model IS in the ObjectPack, returns the correct
-// archive so the item looks right.  For items that need stage-specific OARCs
-// (which may not be loaded), falls back to GetRupee.
-fn get_fallback_model_for_item(item_id: u16) -> *const c_char {
-    match item_id {
-        // --- ObjectPack models (correct visual) ---
-        1 | 200..=206 => c"GetKeySmall".as_ptr(), // Small Keys
-        2 | 3 | 4 | 32..=34 => c"GetRupee".as_ptr(), // Rupees
-        6 => c"GetHeart".as_ptr(),                // Heart
-        8 => c"GetArrow".as_ptr(),                // Arrows
-        40 | 41 => c"GetBomb".as_ptr(),           // Bombs
-        42 => c"GetGenki".as_ptr(),               // Stamina Fruit
-        48 | 35 => c"GetSozaiJ".as_ptr(),         // Gratitude Crystal
-        50 | 207..=213 => c"GetMap".as_ptr(),     // Maps
-        54 => c"GetBottleWater".as_ptr(),         // Bottle of Water
-        55 => c"GetBottleKinokoA".as_ptr(),       // Mushroom Spores
-        57 => c"GetSeed".as_ptr(),                // 5 Deku Seeds
-        72 => c"GetFairy".as_ptr(),               // Fairy
-        88 => c"GetBottleFairy".as_ptr(),         // Fairy in Bottle
-        94 => c"GetHeartKakera".as_ptr(),         // Heart Piece
-        153 => c"GetBottleEmpty".as_ptr(),        // Empty Bottle
-        // --- Sword special case ---
-        10 | 11..=14 => c"GetSwordA".as_ptr(), // Swords
-        // --- Everything else => green rupee (always available) ---
-        _ => c"GetRupee".as_ptr(),
+// ============================================================================
+// Runtime OARC loading for Archipelago items
+// ============================================================================
+//
+// When AP delivers an item via the memory buffer, the player can be in ANY
+// stage.  The item's OARC (Object ARChive containing its 3D model) may not
+// be loaded because it's stage-specific.
+//
+// Esme's solution: call dRawArcTable_c__getArcOrLoadFromDisk() at runtime to
+// load the OARC from romfs/Object/NX before spawning the item actor.  The
+// rando build already places all item OARCs into Object/NX, so they're
+// available on disk.  The game has the prefer_modreplace_for_general_arcs
+// hook that also checks ModReplace automatically.
+//
+// Items with oarc=null in items.yaml are already in ObjectPack (globally
+// loaded) and don't need this — they just work.
+
+/// Check if an OARC is already loaded in the ARC_MGR table.
+unsafe fn is_oarc_loaded(oarc_name: *const c_char) -> bool {
+    if ARC_MGR.is_null() {
+        return false;
+    }
+    let entries = &*(*ARC_MGR).entries_table.entries;
+    for entry in entries.iter() {
+        if entry.arc_name[0] == 0 {
+            break; // End of populated entries
+        }
+        if strcmp(oarc_name, entry.arc_name.as_ptr()) == 0 && entry.ref_count >= 1 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Load a single OARC from Object/NX if not already loaded.
+unsafe fn load_oarc_if_needed(oarc_name: *const c_char) {
+    if !is_oarc_loaded(oarc_name) {
+        let arc_table = &mut (*ARC_MGR).entries_table as *mut mem::ArcEntryTable;
+        dRawArcTable_c__getArcOrLoadFromDisk(
+            arc_table,
+            oarc_name,
+            c"Object/NX".as_ptr(),
+            WORK2_HEAP,
+        );
     }
 }
 
+/// Load all OARCs needed for an AP item so the actor can spawn with the
+/// correct 3D model.  Called before spawn_actor() in the AP buffer loop.
+///
+/// Uses dRawArcTable_c__getArcOrLoadFromDisk which loads the OARC from
+/// romfs/Object/NX (or ModReplace via the automatic hook).
+///
+/// This table is derived from sshd-rando-backend/data/items.yaml.
+/// For progressive items, we load ALL tier OARCs so the correct model is
+/// available regardless of which tier the player is at.
+/// Items not listed here are ObjectPack-native (already loaded globally).
+unsafe fn ensure_ap_item_oarcs_loaded(item_id: u16) {
+    if ARC_MGR.is_null() || WORK2_HEAP.is_null() {
+        return; // Safety: can't load without heap/manager
+    }
+    match item_id {
+        // Progressive Sword (Practice Sword model)
+        10 => load_oarc_if_needed(c"GetSwordA".as_ptr()),
+        // Goddess's Harp + song items
+        16 | 186 | 187 | 188 | 189 | 190 | 191 | 192 | 193 => {
+            load_oarc_if_needed(c"GetHarp".as_ptr());
+        },
+        // Progressive Bow — load all tiers
+        19 => {
+            load_oarc_if_needed(c"GetBowA".as_ptr());
+            load_oarc_if_needed(c"GetBowB".as_ptr());
+            load_oarc_if_needed(c"GetBowC".as_ptr());
+        },
+        // Clawshots
+        20 => load_oarc_if_needed(c"GetHookShot".as_ptr()),
+        // Spiral Charge
+        21 => load_oarc_if_needed(c"GetBirdStatue".as_ptr()),
+        // Boss keys
+        25 => load_oarc_if_needed(c"GetKeyBoss2A".as_ptr()),
+        26 => load_oarc_if_needed(c"GetKeyBoss2B".as_ptr()),
+        27 => load_oarc_if_needed(c"GetKeyBoss2C".as_ptr()),
+        28 => load_oarc_if_needed(c"GetKeyKakera".as_ptr()),
+        29 => load_oarc_if_needed(c"GetKeyBossA".as_ptr()),
+        30 => load_oarc_if_needed(c"GetKeyBossB".as_ptr()),
+        31 => load_oarc_if_needed(c"GetKeyBossC".as_ptr()),
+        // Gust Bellows
+        49 => load_oarc_if_needed(c"GetVacuum".as_ptr()),
+        // Progressive Slingshot
+        52 => {
+            load_oarc_if_needed(c"GetPachinkoA".as_ptr());
+            load_oarc_if_needed(c"GetPachinkoB".as_ptr());
+        },
+        // Progressive Beetle
+        53 => {
+            load_oarc_if_needed(c"GetBeetleA".as_ptr());
+            load_oarc_if_needed(c"GetBeetleB".as_ptr());
+            load_oarc_if_needed(c"GetBeetleC".as_ptr());
+            load_oarc_if_needed(c"GetBeetleD".as_ptr());
+        },
+        // Progressive Mitts
+        56 => {
+            load_oarc_if_needed(c"GetMoleGloveA".as_ptr());
+            load_oarc_if_needed(c"GetMoleGloveB".as_ptr());
+        },
+        // 10 Deku Seeds
+        60 => load_oarc_if_needed(c"GetSeedSet".as_ptr()),
+        // Bottles/potions
+        65 | 66 => load_oarc_if_needed(c"GetBottleMuteki".as_ptr()),
+        // Water Dragon's Scale
+        68 => load_oarc_if_needed(c"GetUroko".as_ptr()),
+        // Medals (Bug, Heart, Rupee, Treasure, Potion, Cursed, Life)
+        70 | 100 | 101 | 102 | 103 | 104 | 114 => {
+            load_oarc_if_needed(c"GetMedal".as_ptr());
+        },
+        // Progressive Bug Net
+        71 => {
+            load_oarc_if_needed(c"GetNetA".as_ptr());
+            load_oarc_if_needed(c"GetNetB".as_ptr());
+        },
+        // Sacred Water
+        74 => load_oarc_if_needed(c"GetBottleHoly".as_ptr()),
+        // Individual beetle tiers
+        75 => load_oarc_if_needed(c"GetBeetleB".as_ptr()),
+        76 => load_oarc_if_needed(c"GetBeetleC".as_ptr()),
+        77 => load_oarc_if_needed(c"GetBeetleD".as_ptr()),
+        // Heart Potion / Heart Potion Plus
+        78 | 79 => load_oarc_if_needed(c"GetBottleKusuri".as_ptr()),
+        // Heart Potion Plus Plus
+        81 => load_oarc_if_needed(c"GetBottleKusuriS".as_ptr()),
+        // Stamina Potion / Plus
+        84 | 85 => load_oarc_if_needed(c"GetBottleGuts".as_ptr()),
+        // Air Potion / Plus
+        86 | 87 => load_oarc_if_needed(c"GetBottleAir".as_ptr()),
+        // Iron Bow / Sacred Bow
+        90 => load_oarc_if_needed(c"GetBowB".as_ptr()),
+        91 => load_oarc_if_needed(c"GetBowC".as_ptr()),
+        // Bomb Bag
+        92 => load_oarc_if_needed(c"GetBombBag".as_ptr()),
+        // Heart Container
+        93 => {
+            load_oarc_if_needed(c"GetHeartUtuwa".as_ptr());
+            load_oarc_if_needed(c"PutHeartUtuwa".as_ptr());
+        },
+        // Triforce pieces
+        95 | 96 | 97 => {
+            load_oarc_if_needed(c"PutTriForceSingle".as_ptr());
+            load_oarc_if_needed(c"GetTriForceSingle".as_ptr());
+        },
+        // Sea Chart
+        98 => load_oarc_if_needed(c"GetMapSea".as_ptr()),
+        // Mogma Mitts (standalone)
+        99 => load_oarc_if_needed(c"GetMoleGloveB".as_ptr()),
+        // Scattershot (standalone)
+        105 => load_oarc_if_needed(c"GetPachinkoB".as_ptr()),
+        // Progressive Wallet
+        108 => {
+            load_oarc_if_needed(c"GetPurseB".as_ptr());
+            load_oarc_if_needed(c"GetPurseC".as_ptr());
+            load_oarc_if_needed(c"GetPurseD".as_ptr());
+            load_oarc_if_needed(c"GetPurseE".as_ptr());
+        },
+        // Individual wallets
+        109 => load_oarc_if_needed(c"GetPurseC".as_ptr()),
+        110 => load_oarc_if_needed(c"GetPurseD".as_ptr()),
+        111 => load_oarc_if_needed(c"GetPurseE".as_ptr()),
+        // Progressive Pouch / Pouch Expansion
+        112 => {
+            load_oarc_if_needed(c"GetPouchA".as_ptr());
+            load_oarc_if_needed(c"GetPouchB".as_ptr());
+        },
+        113 => load_oarc_if_needed(c"GetPouchB".as_ptr()),
+        // Wooden Shield
+        116 => load_oarc_if_needed(c"GetShieldWood".as_ptr()),
+        // Hylian Shield
+        125 => load_oarc_if_needed(c"GetShieldHylia".as_ptr()),
+        // Revitalizing Potion / Plus
+        126 | 127 => load_oarc_if_needed(c"GetBottleRepair".as_ptr()),
+        // Small Seed Satchel
+        128 => load_oarc_if_needed(c"GetSpareSeedA".as_ptr()),
+        // Small Quiver
+        131 => load_oarc_if_needed(c"GetSpareQuiverA".as_ptr()),
+        // Small Bomb Bag
+        134 => load_oarc_if_needed(c"GetSpareBombBagA".as_ptr()),
+        // Whip
+        137 => load_oarc_if_needed(c"GetWhip".as_ptr()),
+        // Fireshield Earrings
+        138 => load_oarc_if_needed(c"GetEarring".as_ptr()),
+        // Big Bug Net (standalone)
+        140 => load_oarc_if_needed(c"GetNetB".as_ptr()),
+        // Cawlin's Letter + Archipelago Item
+        158 | 216 => load_oarc_if_needed(c"GetKobunALetter".as_ptr()),
+        // Beedle's Insect Cage
+        159 => load_oarc_if_needed(c"GetTerryCage".as_ptr()),
+        // Rattle
+        160 => {
+            load_oarc_if_needed(c"GetGaragara".as_ptr());
+            load_oarc_if_needed(c"PutGaragara".as_ptr());
+        },
+        // Tumbleweed
+        163 => load_oarc_if_needed(c"GetSozaiC".as_ptr()),
+        // Ancient Flower
+        166 => load_oarc_if_needed(c"GetSozaiF".as_ptr()),
+        // Dusk Relic
+        168 => load_oarc_if_needed(c"GetSozaiH".as_ptr()),
+        // Monster Horn
+        171 => load_oarc_if_needed(c"GetSozaiL".as_ptr()),
+        // Blue Bird Feather
+        174 => load_oarc_if_needed(c"GetSozaiN".as_ptr()),
+        // Golden Skull
+        175 => load_oarc_if_needed(c"GetSozaiO".as_ptr()),
+        // Goddess Plume
+        176 => load_oarc_if_needed(c"GetSozaiP".as_ptr()),
+        // Tablets
+        177 => load_oarc_if_needed(c"GetSekibanMapA".as_ptr()),
+        178 => load_oarc_if_needed(c"GetSekibanMapB".as_ptr()),
+        179 => load_oarc_if_needed(c"GetSekibanMapC".as_ptr()),
+        // Stone of Trials
+        180 => load_oarc_if_needed(c"GetSirenKey".as_ptr()),
+        // Revitalizing Potion Plus Plus
+        194 => load_oarc_if_needed(c"GetBottleRepairS".as_ptr()),
+        // Pumpkin Soup
+        195 | 196 => load_oarc_if_needed(c"GetBottlePumpkin".as_ptr()),
+        // Life Tree Seedling
+        197 => load_oarc_if_needed(c"GetSeedLife".as_ptr()),
+        // Life Tree Fruit
+        198 => load_oarc_if_needed(c"GetFruitB".as_ptr()),
+        // Extra Wallet
+        199 => load_oarc_if_needed(c"GetSparePurse".as_ptr()),
+        // Tadtones
+        214 => load_oarc_if_needed(c"Onp".as_ptr()),
+        // Scrapper
+        215 => load_oarc_if_needed(c"DesertRobot".as_ptr()),
+        // Groose Trap
+        251 => {
+            load_oarc_if_needed(c"RivalCmnAnm".as_ptr());
+            load_oarc_if_needed(c"RivalNpcAnm".as_ptr());
+        },
+        // ObjectPack-native items (rupees, hearts, arrows, keys, maps, shields, etc.)
+        _ => {},
+    }
+}
+
+// Helper function to get fallback models for items without defined models.
+// Returns an ObjectPack archive name that is guaranteed to be loaded in every
+// stage.  Used as the last-resort fallback when the item's real OARC is not
+// available.  We intentionally use only GetRupee here because it is the one
+// archive that is unconditionally present in ObjectPack across all stages.
+// Attempting to use other archive names (even ones that "should" be in
+// ObjectPack) risks a null model pointer if the game's internal naming
+// doesn't match our assumption.
+fn get_fallback_model_for_item(_item_id: u16) -> *const c_char {
+    c"GetRupee".as_ptr()
+}
+
 // When true, the item actor currently being spawned comes from the Archipelago
-// memory buffer and its stage-specific OARC is almost certainly not loaded.
-// Both model resolution functions check this flag and return an
-// ObjectPack-safe fallback so the actor always initialises, even if the visual
-// is a placeholder. Set by archipelago_check_item_buffer() around the
-// spawn_actor() call.
+// memory buffer.  ensure_ap_item_oarcs_loaded() has already loaded the item's
+// OARC from disk, so both model resolution functions should succeed normally.
+// This flag is still used as a signal so they can apply fallback logic (green
+// rupee) if the OARC load unexpectedly failed (e.g. file missing from romfs).
+// Set by archipelago_check_item_buffer() around the spawn_actor() call.
 static mut AP_FORCE_FALLBACK_MODEL: bool = false;
 
 #[no_mangle]
@@ -1482,13 +1718,26 @@ pub extern "C" fn get_arc_model_from_item(
             );
         }
 
-        // For AP buffer items, use ObjectPack-safe fallback since the item's
-        // stage-specific OARC is not loaded in the player's current room.
+        // For AP buffer items, the OARC was loaded at runtime by
+        // ensure_ap_item_oarcs_loaded() before spawning.  Try normal
+        // resolution — it should now succeed for ALL items.  Fall back
+        // to GetRupee only if the load unexpectedly failed.
         if AP_FORCE_FALLBACK_MODEL {
-            let fallback_model = get_fallback_model_for_item(item_id);
+            let resolved = resolve_progressive_item_models(arc_name, item_id, 1);
+            if !resolved.is_null() {
+                let result = dRawArcTable_c__getDataFromOarc(
+                    arc_table,
+                    resolved,
+                    c"g3d/model.brres".as_ptr(),
+                );
+                if !result.is_null() {
+                    return result; // OARC loaded — correct model!
+                }
+            }
+            // OARC load failed (file missing?) — last-resort fallback
             return dRawArcTable_c__getDataFromOarc(
                 arc_table,
-                fallback_model,
+                c"GetRupee".as_ptr(),
                 c"g3d/model.brres".as_ptr(),
             );
         }
@@ -1542,11 +1791,27 @@ pub extern "C" fn get_item_model_name_ptr(
             return get_fallback_model_for_item(item_id);
         }
 
-        // For AP buffer items, return an ObjectPack-safe model name.
+        // For AP buffer items, the OARC was loaded at runtime.  Try
+        // returning the correct model name so animations and textures
+        // match the actual item.  Fall back to GetRupee only if the
+        // resolved name would reference an unloaded archive.
         if AP_FORCE_FALLBACK_MODEL {
+            let resolved = resolve_progressive_item_models(model_name, item_id, 2);
+            // Verify the resolved OARC is actually loaded before returning
+            // its name.  get_arc_model_from_item uses arc_or_model=1 which
+            // gives archive names, but here (arc_or_model=2) gives model
+            // names which may differ.  Safest: try getDataFromOarc with
+            // the resolved name — if it finds data, the OARC is loaded.
+            if !resolved.is_null() {
+                // Replaced code still needs to execute
+                asm!("mov x1, {0:x}", in(reg) item_id);
+                asm!("cmp x1, #0x1C");
+                return resolved;
+            }
+            // Fallback if resolution returned null
             asm!("mov x1, {0:x}", in(reg) item_id);
             asm!("cmp x1, #0x1C");
-            return get_fallback_model_for_item(item_id);
+            return c"GetRupee".as_ptr();
         }
 
         let resolved_model_name = resolve_progressive_item_models(model_name, item_id, 2);
@@ -1979,8 +2244,20 @@ pub extern "C" fn archipelago_check_item_buffer() {
             let mut pos = (*PLAYER_PTR).obj_base_members.base.pos;
             let pos_ptr = &mut pos as *mut math::Vec3f;
 
-            // Tell model resolution to use ObjectPack-safe fallbacks.
-            // The item's real OARC is not loaded in the player's current stage.
+            // Load the item's OARC at runtime if it's not already available.
+            // This replaces the old AP_FORCE_FALLBACK_MODEL approach that forced
+            // a green rupee model for all non-ObjectPack items.
+            //
+            // dRawArcTable_c__getArcOrLoadFromDisk reads the .arc.LZ file from
+            // romfs/Object/NX (all item OARCs are placed there by the rando
+            // build).  The prefer_modreplace_for_general_arcs hook inside
+            // getArcOrLoadFromDisk also checks ModReplace automatically.
+            ensure_ap_item_oarcs_loaded(item_id as u16);
+
+            // Tell model resolution we're in an AP context.  This is still
+            // used as a signal so get_arc_model_from_item and
+            // get_item_model_name_ptr know to apply fallback logic if the
+            // OARC load happened to fail (e.g. file missing from disk).
             AP_FORCE_FALLBACK_MODEL = true;
 
             let item_actor: *mut dAcItem = actor::spawn_actor(
