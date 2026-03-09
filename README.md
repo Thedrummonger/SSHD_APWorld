@@ -13,7 +13,7 @@ This APWorld allows you to play Skyward Sword HD in a multiworld randomizer with
 - **Full Logic Support**: Ensures you always have items needed to progress
 - **40+ Options**: Customize starting items, logic difficulty, item placement
 - **Custom Logos**: Replace title screen with Archipelago branding
-- **Cross-Platform**: NOT FULLY IMPLEMENTED YET ~~Works on Windows, Linux, and macOS (maybe, I don't have a mac nor do I use Linux)~~
+- **Cross-Platform**: Works on Windows, Linux, and macOS (maybe, I don't have a mac nor do I use Linux)
 
 ## Download
 
