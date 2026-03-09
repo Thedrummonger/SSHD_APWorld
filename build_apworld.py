@@ -10,7 +10,6 @@ import zipfile
 import shutil
 import sys
 import site
-import sysconfig
 import importlib.util
 import subprocess
 import tempfile
@@ -30,22 +29,14 @@ BUNDLED_PACKAGES = [
 # Wheels for each version contain ABI-tagged .pyd files that can coexist.
 BUNDLE_PYTHON_VERSIONS = ["311", "312", "313"]
 
-def _get_pip_platform() -> str:
-    """Detect the pip platform tag for the current system.
-
-    Returns a tag suitable for ``pip download --platform``, e.g.
-    ``win_amd64``, ``manylinux2014_x86_64``, or ``macosx_11_0_arm64``.
-    """
-    plat = sysconfig.get_platform().replace("-", "_").replace(".", "_")
-    if plat.startswith("linux_"):
-        # pip needs a manylinux tag to find binary wheels
-        arch = plat.split("_", 1)[1]
-        return f"manylinux2014_{arch}"
-    return plat
-
-
-# Platform to download wheels for (auto-detected).
-BUNDLE_PLATFORM = _get_pip_platform()
+# Platforms to download wheels for.
+# Including all major platforms so the resulting apworld is cross-platform.
+BUNDLE_PLATFORMS = [
+    "win_amd64",
+    "manylinux2014_x86_64",
+    "macosx_11_0_arm64",
+    "macosx_10_9_x86_64",
+]
 
 
 def _download_and_stage_wheels(packages: list[str], staging_dir: Path):
@@ -60,28 +51,29 @@ def _download_and_stage_wheels(packages: list[str], staging_dir: Path):
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="sshd_wheels_") as wheel_tmpdir:
-        for pyver in BUNDLE_PYTHON_VERSIONS:
-            ver_dir = Path(wheel_tmpdir) / pyver
-            ver_dir.mkdir()
-            for pkg in packages:
-                print(f"  Downloading {pkg} for cp{pyver} {BUNDLE_PLATFORM} ...")
-                try:
-                    subprocess.check_call(
-                        [
-                            sys.executable, "-m", "pip", "download",
-                            pkg,
-                            "--python-version", pyver,
-                            "--platform", BUNDLE_PLATFORM,
-                            "--only-binary", ":all:",
-                            "--no-deps",
-                            "-d", str(ver_dir),
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
-                    )
-                except subprocess.CalledProcessError:
-                    print(f"    WARNING: no wheel for {pkg} cp{pyver} – skipping")
-                    continue
+        for platform in BUNDLE_PLATFORMS:
+            for pyver in BUNDLE_PYTHON_VERSIONS:
+                ver_dir = Path(wheel_tmpdir) / f"{platform}_{pyver}"
+                ver_dir.mkdir()
+                for pkg in packages:
+                    print(f"  Downloading {pkg} for cp{pyver} {platform} ...")
+                    try:
+                        subprocess.check_call(
+                            [
+                                sys.executable, "-m", "pip", "download",
+                                pkg,
+                                "--python-version", pyver,
+                                "--platform", platform,
+                                "--only-binary", ":all:",
+                                "--no-deps",
+                                "-d", str(ver_dir),
+                            ],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                        )
+                    except subprocess.CalledProcessError:
+                        print(f"    WARNING: no wheel for {pkg} cp{pyver} {platform} – skipping")
+                        continue
 
         # Now extract all downloaded wheels into the staging directory.
         # Skip .dist-info metadata – we only need the actual package files.
@@ -164,6 +156,8 @@ def build_apworld():
         # "ArchipelagoSSHDClient.exe",
         "worlds_stub.py",
         "ItemSystemIntegration.py",
+        "process_memory.py",
+        "platform_utils.py",
         "logic_converter.py",
         # Folders
         "docs/",
