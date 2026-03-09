@@ -1456,11 +1456,13 @@ fn get_fallback_model_for_item(item_id: u16) -> *const c_char {
     }
 }
 
-// NOTE: All item OARCs are now injected into the ObjectPack by
-// arcpatchhandler.py (AP_ITEM_OARCS set), so they are globally loaded
-// in every stage.  The null-arc and null-result fallbacks in the model
-// resolution functions below still serve as a safety net for items
-// with undefined OARCs (bugs/treasures) or unexpected lookup failures.
+// When true, the item actor currently being spawned comes from the Archipelago
+// memory buffer and its stage-specific OARC is almost certainly not loaded.
+// Both model resolution functions check this flag and return an
+// ObjectPack-safe fallback so the actor always initialises, even if the visual
+// is a placeholder. Set by archipelago_check_item_buffer() around the
+// spawn_actor() call.
+static mut AP_FORCE_FALLBACK_MODEL: bool = false;
 
 #[no_mangle]
 pub extern "C" fn get_arc_model_from_item(
@@ -1472,6 +1474,17 @@ pub extern "C" fn get_arc_model_from_item(
         // Safety check: If arc_name is null (item has no model defined),
         // use a fallback model based on item type. This happens with bugs/treasures.
         if arc_name.is_null() {
+            let fallback_model = get_fallback_model_for_item(item_id);
+            return dRawArcTable_c__getDataFromOarc(
+                arc_table,
+                fallback_model,
+                c"g3d/model.brres".as_ptr(),
+            );
+        }
+
+        // For AP buffer items, use ObjectPack-safe fallback since the item's
+        // stage-specific OARC is not loaded in the player's current room.
+        if AP_FORCE_FALLBACK_MODEL {
             let fallback_model = get_fallback_model_for_item(item_id);
             return dRawArcTable_c__getDataFromOarc(
                 arc_table,
@@ -1524,6 +1537,13 @@ pub extern "C" fn get_item_model_name_ptr(
         // use fallback model name. This happens with bugs/treasures.
         if model_name.is_null() {
             // Replaced code still needs to execute
+            asm!("mov x1, {0:x}", in(reg) item_id);
+            asm!("cmp x1, #0x1C");
+            return get_fallback_model_for_item(item_id);
+        }
+
+        // For AP buffer items, return an ObjectPack-safe model name.
+        if AP_FORCE_FALLBACK_MODEL {
             asm!("mov x1, {0:x}", in(reg) item_id);
             asm!("cmp x1, #0x1C");
             return get_fallback_model_for_item(item_id);
@@ -1959,6 +1979,10 @@ pub extern "C" fn archipelago_check_item_buffer() {
             let mut pos = (*PLAYER_PTR).obj_base_members.base.pos;
             let pos_ptr = &mut pos as *mut math::Vec3f;
 
+            // Tell model resolution to use ObjectPack-safe fallbacks.
+            // The item's real OARC is not loaded in the player's current stage.
+            AP_FORCE_FALLBACK_MODEL = true;
+
             let item_actor: *mut dAcItem = actor::spawn_actor(
                 actor::ACTORID::ITEM,
                 (*ROOM_MGR).roomid.into(),
@@ -1968,6 +1992,8 @@ pub extern "C" fn archipelago_check_item_buffer() {
                 core::ptr::null_mut(),
                 0xFFFFFFFF,
             ) as *mut dAcItem;
+
+            AP_FORCE_FALLBACK_MODEL = false;
 
             ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
             NUMBER_OF_ITEMS = 0;
