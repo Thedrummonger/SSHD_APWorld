@@ -114,6 +114,61 @@ class GameItemSystem:
         self._consecutive_failures: int = 0
         self.MAX_FAILURES_BEFORE_CYCLE = 3  # Try next buffer address after this many failures
         
+        # Set True once we confirm the selected buffer is the real game buffer
+        # (game set the itemflag after processing).  Skips the 250ms post-
+        # delivery verification delay for subsequent items.
+        self._buffer_verified: bool = False
+        
+    def _score_buffer_candidate(self, offset: int, magic_signature: bytes,
+                                cs_addresses: list) -> tuple:
+        """Score a buffer candidate to determine if it's the real game buffer.
+
+        Returns (total_score, detail_dict) where higher score = more likely real.
+
+        Scoring criteria:
+          +1 per zero byte in slots 1-15 (max 60) — real buffer is all-zero
+          +100 if write-read-back test passes (writable memory)
+          +50  if within 4 MB of any AP_CHECK_STATS address (same module)
+          -200 if fewer than 40 of 60 data bytes are zero (very unlikely real)
+        """
+        details = {"zero_count": 0, "writable": False, "near_stats": False}
+        score = 0
+
+        # Read full 64 bytes (16 slots × 4 bytes)
+        try:
+            data = self.memory.read_bytes(offset, 64)
+            if not data or len(data) < 64:
+                return (-1000, details)
+            if data[:4] != magic_signature:
+                return (-1000, details)
+        except Exception:
+            return (-1000, details)
+
+        # Count zero bytes in slots 1-15 (bytes 4-63).
+        # The real buffer should have 60/60 zeros when no items are pending.
+        zero_count = sum(1 for b in data[4:64] if b == 0)
+        details["zero_count"] = zero_count
+        score += zero_count
+        if zero_count < 40:
+            score -= 200  # Almost certainly a false positive
+
+        # Writability: test write + read-back on slot 1
+        if self._test_buffer_access(offset):
+            score += 100
+            details["writable"] = True
+
+        # Proximity to AP_CHECK_STATS (Rust statics live in the same module)
+        base_address = self.memory.base_address or 0
+        abs_addr = base_address + offset
+        MODULE_RANGE = 4 * 1024 * 1024  # 4 MB
+        for cs_addr in cs_addresses:
+            if abs(abs_addr - cs_addr) < MODULE_RANGE:
+                score += 50
+                details["near_stats"] = True
+                break
+
+        return (score, details)
+
     def _find_buffer_address(self) -> Optional[int]:
         """
         Find the Archipelago buffer address by scanning for magic signature.
@@ -129,6 +184,13 @@ class GameItemSystem:
         Collects ALL valid candidate addresses so we can cycle between them
         if the first one turns out to be the wrong buffer.
         
+        **Buffer scoring (v2):** Instead of blindly picking the first candidate,
+        each candidate is scored by:
+          - Zero-byte count in slots 1-15 (real buffer = 60/60 zeros on init)
+          - Writability (write + read-back test)
+          - Proximity to AP_CHECK_STATS (same subsdk8 module)
+        The highest-scoring candidate is selected.
+        
         Returns:
             Buffer address OFFSET (relative to base) if found, None otherwise
         """
@@ -139,28 +201,62 @@ class GameItemSystem:
             logger.error("❌ Base address not set")
             return None
         
-        # --- Fast path: use addresses cached during the base-address scan ---
+        # Grab AP_CHECK_STATS addresses for cross-reference scoring
         prescan = getattr(self.memory, 'prescan_results', {})
+        cs_addresses = prescan.get("AP_CHECK_STATS", [])
         cached = prescan.get("AP_ITEM_BUFFER", [])
         
-        # Collect ALL valid candidates, not just the first
+        # --- Fast path: score all prescan candidates and pick the best ---
         self._candidate_buffer_addrs = []
+        scored_candidates = []  # (score, offset, details)
+        
         for addr in cached:
             buffer_offset = addr - base_address
             try:
                 test_data = self.memory.read_bytes(buffer_offset, 4)
-                if test_data == magic_signature:
-                    self._candidate_buffer_addrs.append(buffer_offset)
+                if test_data != magic_signature:
+                    continue
             except Exception:
                 continue
+            
+            self._candidate_buffer_addrs.append(buffer_offset)
+            score, details = self._score_buffer_candidate(
+                buffer_offset, magic_signature, cs_addresses
+            )
+            scored_candidates.append((score, buffer_offset, details))
+            abs_addr = base_address + buffer_offset
+            logger.info(
+                f"[BufferScore] Candidate 0x{abs_addr:x} (offset 0x{buffer_offset:x}): "
+                f"score={score}, zeros={details['zero_count']}/60, "
+                f"writable={details['writable']}, near_stats={details['near_stats']}"
+            )
         
-        if self._candidate_buffer_addrs:
+        if scored_candidates:
+            # Sort by score descending — pick best
+            scored_candidates.sort(key=lambda t: t[0], reverse=True)
+            best_score, best_offset, best_details = scored_candidates[0]
+            
+            # Reorder _candidate_buffer_addrs so the best is first
+            self._candidate_buffer_addrs = [t[1] for t in scored_candidates]
             self._current_buffer_index = 0
-            chosen = self._candidate_buffer_addrs[0]
-            abs_addr = base_address + chosen
-            logger.debug(f"Found Archipelago buffer at 0x{abs_addr:x} (offset 0x{chosen:x}) [prescan cache]")
-            logger.debug(f"   {len(self._candidate_buffer_addrs)} candidate buffer address(es) available")
-            return chosen
+            
+            abs_addr = base_address + best_offset
+            logger.info(
+                f"[BufferSelect] Selected buffer at 0x{abs_addr:x} "
+                f"(score {best_score}, {len(scored_candidates)} candidates, "
+                f"zeros={best_details['zero_count']}/60, "
+                f"writable={best_details['writable']}, "
+                f"near_stats={best_details['near_stats']})"
+            )
+            
+            if best_details["zero_count"] < 50:
+                logger.warning(
+                    f"[BufferSelect] ⚠️ Best candidate only has "
+                    f"{best_details['zero_count']}/60 zero bytes in data slots. "
+                    f"This may be a false positive! Items may not be delivered."
+                )
+            
+            return best_offset
         
         # --- Slow path: full process scan ---
         logger.debug("Scanning entire process memory for Archipelago buffer magic signature...")
@@ -295,6 +391,53 @@ class GameItemSystem:
         # Wait for game to process (buffer cleared when done)
         success = self._wait_for_item_processed(buffer_offset, expected_item_id=item_id)
         
+        # ---- Wrong-buffer detection -----------------------------------------
+        # After the game processes the buffer, it spawns an item actor whose
+        # collection sequence sets the itemflag within a few frames.
+        # If we're on a FALSE-POSITIVE buffer address, the slot appeared
+        # "cleared" (random memory activity) but no actor was spawned, so the
+        # flag will NOT be set.
+        #
+        # Strategy: wait a short time for the flag to be set by the game,
+        # then READ it (without writing).  If it's still not set despite a
+        # "successful" buffer clear, we're on the wrong buffer → cycle.
+        #
+        # This check only runs until the buffer is verified (first successful
+        # flag confirmation).  After that, the 250ms delay is skipped.
+        #
+        # After the check, _ensure_itemflag_set() writes the flag as a
+        # belt-and-suspenders fallback regardless.
+        if success and item_id <= 215 and not self._buffer_verified:
+            # Give the game 15 frames (~250ms) to set the flag via the
+            # actor collection sequence.  Event-triggered items (0x180000)
+            # begin collection immediately, so this is generous.
+            for _wait in range(15):
+                time.sleep(1.0 / 60.0)
+            game_set_flag = self._check_itemflag(item_id)
+            
+            if game_set_flag:
+                self._buffer_verified = True
+                logger.info(
+                    "[BufferVerified] Game confirmed item flag — buffer "
+                    "address is correct. Skipping verification for future items."
+                )
+            else:
+                logger.warning(
+                    f"[WrongBuffer?] Buffer reported item {item_id} processed, "
+                    f"but itemflag is NOT set after 250ms! This buffer address "
+                    f"is likely a false positive."
+                )
+                success = False  # Force retry
+                if len(self._candidate_buffer_addrs) > 1:
+                    self._cycle_to_next_buffer()
+                    self._buffer_verified = False  # reset for new candidate
+                else:
+                    logger.error(
+                        "[WrongBuffer?] No other buffer candidates available. "
+                        "The AP game mod may not be loaded — verify romfs "
+                        "patches are installed in Ryujinx."
+                    )
+        
         # ---- Direct-write fallback (belt-and-suspenders) --------------------
         # The Rust actor-spawn path can silently fail for certain items
         # (missing model archives, determineFinalItemid issues, etc.).
@@ -302,7 +445,7 @@ class GameItemSystem:
         # reaches the player's inventory regardless of what happened on the
         # game side.  If the Rust spawn DID work, the flag is already set
         # and this write is a harmless no-op.
-        self._ensure_itemflag_set(item_id)
+        flag_confirmed = self._ensure_itemflag_set(item_id)
         
         if success:
             self._consecutive_failures = 0
@@ -325,6 +468,7 @@ class GameItemSystem:
         self._current_buffer_index = (self._current_buffer_index + 1) % len(self._candidate_buffer_addrs)
         self.buffer_addr = self._candidate_buffer_addrs[self._current_buffer_index]
         self._consecutive_failures = 0
+        self._buffer_verified = False  # must re-verify the new candidate
         
         # Clear ALL slots in the new buffer to start fresh
         self.clear_buffer()
@@ -575,9 +719,37 @@ class GameItemSystem:
         
         return None
     
-    # ---- Direct item-flag writing (guaranteed delivery fallback) --------
+    # ---- Direct item-flag reading and writing (guaranteed delivery) --------
 
-    def _ensure_itemflag_set(self, item_id: int) -> None:
+    def _check_itemflag(self, item_id: int) -> bool:
+        """Read-only check: is the itemflag for this item currently set?
+
+        Checks the uncommitted/static copy (the working copy the game checks
+        during gameplay) to see if the game's actor-spawn set the flag.
+        Does NOT write anything.
+
+        Returns True if the flag is set, False otherwise.
+        """
+        if not self.memory or not self.memory.connected:
+            return False
+        if item_id > 215:
+            return True  # virtual items have no flag — treat as OK
+
+        flag_id = item_id
+        word_idx = flag_id // 16
+        bit_idx = flag_id % 16
+        byte_off = word_idx * 2
+        mask = 1 << bit_idx
+
+        try:
+            current = self.memory.read_short(GameOffsets.STATIC_ITEMFLAGS + byte_off)
+            if current is not None:
+                return bool(current & mask)
+        except Exception as exc:
+            logger.debug(f"[CheckFlag] Could not read flag {flag_id}: {exc}")
+        return False
+
+    def _ensure_itemflag_set(self, item_id: int) -> bool:
         """Guarantee an item is in the player's inventory by setting its flag
         directly in save memory.
 
@@ -597,15 +769,17 @@ class GameItemSystem:
         sets the "has collected at least one" flag bit and does NOT
         increment the actual quantity counter.  Equipment, key items,
         songs, and similar single-acquisition items are fully covered.
+
+        Returns True if the flag is confirmed set after the operation.
         """
         if not self.memory or not self.memory.connected:
-            return
+            return False
 
         # Item IDs above 215 are custom/virtual (Archipelago Item 216,
         # traps 250+, goddess cubes 257+, Game Beatable 256).  These do
         # not have a real item flag in the vanilla flag table.
         if item_id > 215:
-            return
+            return True  # nothing to set — not a failure
 
         flag_id = item_id
         word_idx = flag_id // 16
@@ -613,18 +787,43 @@ class GameItemSystem:
         byte_off = word_idx * 2
         mask = 1 << bit_idx
 
+        confirmed = False
         bases = (GameOffsets.FA_ITEMFLAGS, GameOffsets.STATIC_ITEMFLAGS)
         for base in bases:
             try:
                 current = self.memory.read_short(base + byte_off)
-                if current is not None and not (current & mask):
-                    self.memory.write_short(base + byte_off, current | mask)
-                    logger.info(
-                        f"[DirectFlag] Set itemflag {flag_id} "
-                        f"(word {word_idx}, bit {bit_idx}) at base 0x{base:x}"
+                if current is None:
+                    logger.warning(
+                        f"[DirectFlag] read_short returned None at 0x{base + byte_off:x} "
+                        f"for flag {flag_id}"
                     )
+                    continue
+
+                if not (current & mask):
+                    self.memory.write_short(base + byte_off, current | mask)
+                    # Read back to verify the write stuck
+                    verify = self.memory.read_short(base + byte_off)
+                    if verify is not None and (verify & mask):
+                        logger.info(
+                            f"[DirectFlag] Set itemflag {flag_id} "
+                            f"(word {word_idx}, bit {bit_idx}) at base 0x{base:x} "
+                            f"[verified]"
+                        )
+                        confirmed = True
+                    else:
+                        logger.warning(
+                            f"[DirectFlag] Write to flag {flag_id} at 0x{base:x} "
+                            f"did NOT stick! wrote 0x{current | mask:04x}, "
+                            f"read back 0x{verify:04x}" if verify is not None
+                            else f"read back None"
+                        )
+                else:
+                    # Flag was already set (game handled it)
+                    confirmed = True
             except Exception as exc:
-                logger.debug(f"[DirectFlag] Could not write flag {flag_id}: {exc}")
+                logger.warning(f"[DirectFlag] Could not write flag {flag_id}: {exc}")
+
+        return confirmed
 
     def clear_buffer(self):
         """Clear all slots in item buffer."""
