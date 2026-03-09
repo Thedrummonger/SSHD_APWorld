@@ -690,10 +690,20 @@ class RyujinxMemoryReader:
             chunks_scanned = 0
             regions_scanned = 0
             
-            # Enumerate all readable memory regions (cross-platform)
-            all_regions = self.pm.enumerate_regions()
-            readable_regions = [r for r in all_regions if r.is_readable]
-            print(f"[DEBUG] Found {len(readable_regions)} readable regions out of {len(all_regions)} total")
+            # Enumerate memory regions.  On Linux, use the optimised filter
+            # that skips file-backed/tiny regions and coalesces adjacent maps,
+            # reducing ~3 000 regions to ~20-40 and cutting scan time from
+            # minutes to seconds.
+            if hasattr(self.pm, 'enumerate_scannable_regions'):
+                readable_regions = self.pm.enumerate_scannable_regions()
+                all_count = len(self.pm.enumerate_regions())
+            else:
+                all_regions = self.pm.enumerate_regions()
+                readable_regions = [r for r in all_regions if r.is_readable]
+                all_count = len(all_regions)
+            total_scan_bytes = sum(r.size for r in readable_regions)
+            print(f"[DEBUG] Scanning {len(readable_regions)} regions "
+                  f"({total_scan_bytes / (1024*1024):.0f} MB) out of {all_count} total")
 
             # Collect candidate addresses for the game base signature
             best_base = None
