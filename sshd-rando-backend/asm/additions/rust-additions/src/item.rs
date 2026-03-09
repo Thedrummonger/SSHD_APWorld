@@ -1427,15 +1427,40 @@ pub extern "C" fn resolve_progressive_item_models(
 }
 
 // Helper function to get fallback models for items without defined models.
-// Uses GetRupee because it's in the ObjectPack and always available in every
-// stage.
+// Returns an ObjectPack archive name that is guaranteed to be loaded in every
+// stage.  For items whose real model IS in the ObjectPack, returns the correct
+// archive so the item looks right.  For items that need stage-specific OARCs
+// (which may not be loaded), falls back to GetRupee.
 fn get_fallback_model_for_item(item_id: u16) -> *const c_char {
     match item_id {
-        // Progressive Sword - always use Practice Sword model
-        10 => c"GetSwordA".as_ptr(),
+        // --- ObjectPack models (correct visual) ---
+        1 | 200..=206 => c"GetKeySmall".as_ptr(), // Small Keys
+        2 | 3 | 4 | 32..=34 => c"GetRupee".as_ptr(), // Rupees
+        6 => c"GetHeart".as_ptr(),                // Heart
+        8 => c"GetArrow".as_ptr(),                // Arrows
+        40 | 41 => c"GetBomb".as_ptr(),           // Bombs
+        42 => c"GetGenki".as_ptr(),               // Stamina Fruit
+        48 | 35 => c"GetSozaiJ".as_ptr(),         // Gratitude Crystal
+        50 | 207..=213 => c"GetMap".as_ptr(),     // Maps
+        54 => c"GetBottleWater".as_ptr(),         // Bottle of Water
+        55 => c"GetBottleKinokoA".as_ptr(),       // Mushroom Spores
+        57 => c"GetSeed".as_ptr(),                // 5 Deku Seeds
+        72 => c"GetFairy".as_ptr(),               // Fairy
+        88 => c"GetBottleFairy".as_ptr(),         // Fairy in Bottle
+        94 => c"GetHeartKakera".as_ptr(),         // Heart Piece
+        153 => c"GetBottleEmpty".as_ptr(),        // Empty Bottle
+        // --- Sword special case ---
+        10 | 11..=14 => c"GetSwordA".as_ptr(), // Swords
+        // --- Everything else => green rupee (always available) ---
         _ => c"GetRupee".as_ptr(),
     }
 }
+
+// NOTE: All item OARCs are now injected into the ObjectPack by
+// arcpatchhandler.py (AP_ITEM_OARCS set), so they are globally loaded
+// in every stage.  The null-arc and null-result fallbacks in the model
+// resolution functions below still serve as a safety net for items
+// with undefined OARCs (bugs/treasures) or unexpected lookup failures.
 
 #[no_mangle]
 pub extern "C" fn get_arc_model_from_item(
@@ -1467,11 +1492,25 @@ pub extern "C" fn get_arc_model_from_item(
             );
         }
 
-        return dRawArcTable_c__getDataFromOarc(
+        let result = dRawArcTable_c__getDataFromOarc(
             arc_table,
             resolved_model_name,
             c"g3d/model.brres".as_ptr(),
         );
+
+        // If the OARC is not loaded in the current stage, fall back to an
+        // ObjectPack model so the item actor still initialises.  The item_id
+        // in param1 still determines what the player actually receives.
+        if result.is_null() {
+            let fallback_model = get_fallback_model_for_item(item_id);
+            return dRawArcTable_c__getDataFromOarc(
+                arc_table,
+                fallback_model,
+                c"g3d/model.brres".as_ptr(),
+            );
+        }
+
+        return result;
     }
 }
 

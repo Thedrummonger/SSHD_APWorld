@@ -21,6 +21,92 @@ from sslib.u8file import U8File
 from .othermods import get_cache_oarc_path
 
 
+# All item OARCs that AP-received items may need.
+# These must be globally available in every stage so items spawned from the
+# Archipelago buffer always find their model archives, regardless of which
+# stage the player is currently in.
+AP_ITEM_OARCS = {
+    "DesertRobot.arc",
+    "GetBeetleA.arc",
+    "GetBeetleB.arc",
+    "GetBeetleC.arc",
+    "GetBeetleD.arc",
+    "GetBirdStatue.arc",
+    "GetBombBag.arc",
+    "GetBottleAir.arc",
+    "GetBottleGuts.arc",
+    "GetBottleHoly.arc",
+    "GetBottleKusuri.arc",
+    "GetBottleKusuriS.arc",
+    "GetBottleMuteki.arc",
+    "GetBottlePumpkin.arc",
+    "GetBottleRepair.arc",
+    "GetBottleRepairS.arc",
+    "GetBowA.arc",
+    "GetBowB.arc",
+    "GetBowC.arc",
+    "GetEarring.arc",
+    "GetFruitB.arc",
+    "GetGaragara.arc",
+    "GetHarp.arc",
+    "GetHeartUtuwa.arc",
+    "GetHookShot.arc",
+    "GetKeyBoss2A.arc",
+    "GetKeyBoss2B.arc",
+    "GetKeyBoss2C.arc",
+    "GetKeyBossA.arc",
+    "GetKeyBossB.arc",
+    "GetKeyBossC.arc",
+    "GetKeyKakera.arc",
+    "GetKobunALetter.arc",
+    "GetMapSea.arc",
+    "GetMedal.arc",
+    "GetMoleGloveA.arc",
+    "GetMoleGloveB.arc",
+    "GetNetA.arc",
+    "GetNetB.arc",
+    "GetPachinkoA.arc",
+    "GetPachinkoB.arc",
+    "GetPouchA.arc",
+    "GetPouchB.arc",
+    "GetPurseB.arc",
+    "GetPurseC.arc",
+    "GetPurseD.arc",
+    "GetPurseE.arc",
+    "GetSeedLife.arc",
+    "GetSeedSet.arc",
+    "GetSekibanMapA.arc",
+    "GetSekibanMapB.arc",
+    "GetSekibanMapC.arc",
+    "GetShieldHylia.arc",
+    "GetShieldWood.arc",
+    "GetSirenKey.arc",
+    "GetSozaiC.arc",
+    "GetSozaiF.arc",
+    "GetSozaiH.arc",
+    "GetSozaiL.arc",
+    "GetSozaiN.arc",
+    "GetSozaiO.arc",
+    "GetSozaiP.arc",
+    "GetSpareBombBagA.arc",
+    "GetSparePurse.arc",
+    "GetSpareQuiverA.arc",
+    "GetSpareSeedA.arc",
+    "GetSwordA.arc",
+    "GetTerryCage.arc",
+    "GetTriForceSingle.arc",
+    "GetUroko.arc",
+    "GetVacuum.arc",
+    "GetWhip.arc",
+    "Onp.arc",
+    "PutGaragara.arc",
+    "PutHeartUtuwa.arc",
+    "PutTriForceSingle.arc",
+    "RivalCmnAnm.arc",
+    "RivalNpcAnm.arc",
+}
+
+
 def patch_object_folder(object_folder_output_path: Path, other_mods: list[str] = []):
     print_progress_text("Moving arcs to Object folder")
     start_move_arcs_time = time.process_time()
@@ -45,6 +131,12 @@ def patch_object_folder(object_folder_output_path: Path, other_mods: list[str] =
 
         if not arc_data_path.exists():
             raise Exception(f"ERROR: {arc_name} not found in oarc cache.")
+
+        # Force AP item OARCs into the ObjectPack so they are globally loaded
+        # in every stage. This allows AP-received items to always display their
+        # correct 3D model regardless of where the player is standing.
+        if arc_name in AP_ITEM_OARCS and arc_name not in objectpack_arc_names:
+            objectpack_arc.add_file_data(f"oarc/{arc_name}", arc_data_path.read_bytes())
 
         # Replace arcs in objectpack. If an arc doesn't belong there, add it to the Object/NX folder.
         if arc_name in objectpack_arc_names:
