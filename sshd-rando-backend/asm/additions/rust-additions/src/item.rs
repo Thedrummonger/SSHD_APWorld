@@ -122,6 +122,9 @@ extern "C" {
     static mut NUMBER_OF_ITEMS: u32;
     static mut ACTORBASE_PARAM2: u32;
 
+    static mut NEXT_CUSTOM_FLAG: u16;
+    static mut NEXT_CUSTOM_FLAG_PENDING: u8;
+
     static mut SQUIRRELS_CAUGHT_THIS_PLAY_SESSION: bool;
     static TADTONE_SCENEFLAGS: [u8; 17];
 
@@ -822,6 +825,15 @@ pub extern "C" fn academy_bell_give_custom_item() {
         let itemid = (*bell_actor).base.basebase.members.param1 & 0xFF;
         let param1 = 0x19FC00 | itemid; // item will set sceneflag 127 on collection
         asm!("mov w1, {0:w}", in(reg) param1);
+
+        // Read Archipelago custom_flag from Bell actor's params2 bits 8-17 (10 bits)
+        // and set NEXT_CUSTOM_FLAG so spawned_actor_traps() propagates it
+        // to the spawned item actor's params2
+        let custom_flag = ((*bell_actor).base.members.base.param2 >> 8) & 0x3FF;
+        if custom_flag != 0x3FF {
+            NEXT_CUSTOM_FLAG = custom_flag as u16;
+            NEXT_CUSTOM_FLAG_PENDING = 1;
+        }
 
         // Replaced instructions
         asm!("mov w4, #0xFFFFFFFF", "mov w5, wzr");

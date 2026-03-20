@@ -6,9 +6,10 @@ ldrb w9, [x19, 0xD] ; load 00 00 FF 00 from param1 (the patched itemid)
 .offset 0x71007686b8
 mov w1, #0xfe00
 
-; Replace call to dAcItem__spawnItemWithParams with dAcItem__spawnRandoItemWithParams
+; Replace call to dAcItem__spawnItemWithParams with chandelier wrapper
+; that sets NEXT_CUSTOM_FLAG from actor params2 before spawning
 .offset 0x71007686d4
-bl dAcItem__spawnRandoItemWithParams
+bl 0x7100659af8
 
 
 ; Patch chandelier heart piece it another place xD
@@ -18,9 +19,10 @@ ldrb w9, [x19, 0xD] ; load 00 00 FF 00 from param1 (the patched itemid)
 ; orr w1, w9, w8
 ; movk w1, #0xff9c, LSL #16
 
-; Replace call to dAcItem__spawnItemWithParams with dAcItem__spawnRandoItemWithParams
+; Replace call to dAcItem__spawnItemWithParams with chandelier wrapper
+; that sets NEXT_CUSTOM_FLAG from actor params2 before spawning
 .offset 0x7100768794
-bl dAcItem__spawnRandoItemWithParams
+bl 0x7100659af8
 
 
 ; Allow bonking down chandelier during Levias quest.

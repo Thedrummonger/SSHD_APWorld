@@ -20,8 +20,8 @@
 ; Total available instructions:                     370 (decimal)
 ; 
 ; Please update this:
-; Total space used (bytes):                         10C
-; Total instructions used:                           28
+; Total space used (bytes):                         12C
+; Total instructions used:                           35
 
 ; startflags
 .offset 0x7100659ab0
@@ -68,6 +68,24 @@ b additions_jumptable
 .offset 0x7100659af0
 mov w8, #95
 b additions_jumptable
+
+; Chandelier custom flag wrapper
+; Reads Archipelago custom_flag from Chandel actor (x19) params2 bits 8-17,
+; sets NEXT_CUSTOM_FLAG/NEXT_CUSTOM_FLAG_PENDING so spawned_actor_traps()
+; propagates it to the spawned item, then tail-calls dAcItem__spawnRandoItemWithParams.
+; Called via bl from chandelier-item.asm in place of bl dAcItem__spawnRandoItemWithParams.
+.offset 0x7100659af8
+ldr w8, [x19, #0x12C]
+ubfx w8, w8, #8, #10
+cmp w8, #0x3FF
+b.eq 0x7100659b18
+adrp x9, NEXT_CUSTOM_FLAG
+strh w8, [x9, #0x7c]
+mov w8, #1
+strb w8, [x9, #0x7e]
+
+.offset 0x7100659b18
+b dAcItem__spawnRandoItemWithParams
 
 ; Actually branches to the rust additions landingpad
 ; additions_jumptable

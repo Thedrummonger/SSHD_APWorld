@@ -398,7 +398,7 @@ def patch_heart_container(bzs: dict, itemid: int, trapid: int):
     )
 
 
-def patch_chandelier_item(bzs: dict, itemid: int, trapid: int):
+def patch_chandelier_item(bzs: dict, itemid: int, trapid: int, custom_flag: int = 0x3FF):
     chandelier: dict | None = next(
         filter(lambda x: x["name"] == "Chandel", bzs["OBJ "]), None
     )
@@ -411,6 +411,12 @@ def patch_chandelier_item(bzs: dict, itemid: int, trapid: int):
         itemid = 34  # rupoor
 
     chandelier["params1"] = mask_shift_set(chandelier["params1"], 0xFF, 8, itemid)
+
+    # Encode Archipelago custom_flag into params2 bits 8-17 (10 bits)
+    if custom_flag != 0x3FF:
+        chandelier["params2"] = mask_shift_set(
+            chandelier.get("params2", 0xFFFFFFFF), 0x3FF, 8, custom_flag
+        )
 
 
 def patch_tree_of_life(bzs: dict, itemid: int, trapid: int):
@@ -571,7 +577,7 @@ def patch_tgreact(
         tgreact["params2"] = mask_shift_set(tgreact["params2"], 0x3FF, 8, 0x3FF)
 
 
-def patch_academy_bell(bzs: dict, itemid: int, trapid: int):
+def patch_academy_bell(bzs: dict, itemid: int, trapid: int, custom_flag: int = 0x3FF):
 
     academy_bell: dict | None = next(
         filter(lambda x: x["name"] == "Bell", bzs["OBJ "]), None
@@ -585,6 +591,12 @@ def patch_academy_bell(bzs: dict, itemid: int, trapid: int):
         itemid = 34  # rupoor
 
     academy_bell["params1"] = mask_shift_set(academy_bell["params1"], 0xFF, 0, itemid)
+
+    # Encode Archipelago custom_flag into params2 bits 8-17 (10 bits)
+    if custom_flag != 0x3FF:
+        academy_bell["params2"] = mask_shift_set(
+            academy_bell.get("params2", 0xFFFFFFFF), 0x3FF, 8, custom_flag
+        )
 
 
 def patch_hrphint(bzs: dict, itemid: int, object_id_str: str, trapid: int):
@@ -1142,6 +1154,7 @@ class StagePatchHandler:
                             room_bzs["LAY "][f"l{layer}"],
                             itemid,
                             trapid,
+                            custom_flag,
                         )
                     elif object_name == "Soil":
                         patch_digspot_item(
@@ -1183,6 +1196,7 @@ class StagePatchHandler:
                             room_bzs["LAY "][f"l{layer}"],
                             itemid,
                             trapid,
+                            custom_flag,
                         )
                     elif object_name == "Clef":
                         patch_tadtone_group(
