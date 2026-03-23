@@ -30,6 +30,7 @@ Skyward Sword HD:
   #    - Moon Jump
   #    - Infinite Beetle Flying Time
   #    - Infinite Loftwing Charges
+  #    - No Electric Stun
   #    - Speed Multiplier
 
 
@@ -142,6 +143,12 @@ Skyward Sword HD:
   # When enabled, the Loftwing's spiral charge counter stays at 3.
   # You can perform unlimited spiral charges while flying.
   cheat_infinite_loftwing: false
+
+  # No Electric Stun
+  # When enabled, the electric shock/stun effect is neutralised every tick.
+  # Technoblin electricity (and any other source) will still deal normal
+  # knockback damage, but the prolonged paralysis animation is removed.
+  cheat_no_electric_stun: false
 
   # Speed Multiplier
   # Multiplies Link's forward movement speed.

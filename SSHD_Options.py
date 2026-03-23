@@ -1432,6 +1432,15 @@ class CheatInfiniteLoftwing(Toggle):
     display_name = "Infinite Loftwing Charges"
 
 
+class CheatNoElectricStun(Toggle):
+    """
+    When enabled, the electric shock/stun effect is neutralised every tick.
+    Technoblin electricity (and any other source) will still deal normal
+    knockback damage, but the prolonged paralysis animation is removed.
+    """
+    display_name = "No Electric Stun"
+
+
 class CheatSpeedMultiplier(Range):
     """
     Multiplies Link's forward movement speed.
@@ -1672,6 +1681,7 @@ class SSHDOptions(PerGameCommonOptions):
     cheat_moon_jump: CheatMoonJump
     cheat_infinite_beetle: CheatInfiniteBeetle
     cheat_infinite_loftwing: CheatInfiniteLoftwing
+    cheat_no_electric_stun: CheatNoElectricStun
     cheat_speed_multiplier: CheatSpeedMultiplier
     
     # Archipelago

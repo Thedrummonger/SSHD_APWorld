@@ -290,6 +290,11 @@ OFFSET_SPEED_OVERRIDE = 0x64E8  # f32, controls movement speed (player-relative)
 OFFSET_SHIELD_POUCH_SLOT = 0x53B1  # u8, index into pouch_items for equipped shield (relative to SaveFile A)
 OFFSET_POUCH_ITEMS = 0x7C0         # [i32; 8], pouch item slots (relative to SaveFile A)
 OFFSET_SHIELD_BURN_TIMER = 0x642C  # dPlayer.shield_burn_timer (u16)  — was 0x6484!
+OFFSET_SHOCK_EFFECT_TIMER = 0x6430  # dPlayer.shock_effect_timer (u16)
+OFFSET_CURRENT_ACTION = 0x468       # dPlayer.current_action (u32, PLAYER_ACTIONS enum)
+ACTION_DAMAGE_ELECTRIC = 0x3B       # PLAYER_ACTIONS::DAMAGE_ELECTRIC
+ACTION_ELECTRICUTED    = 0x3C       # PLAYER_ACTIONS::ELECTRICUTED_MAYBE
+ACTION_HIT_BY_ENEMY    = 0x34       # PLAYER_ACTIONS::HIT_BY_ENEMY
 
 # Shield item IDs (low byte of pouch_items entry)
 SHIELD_IDS = {116, 117, 118, 119, 120, 121, 122, 123, 124, 125}
@@ -1247,6 +1252,7 @@ class SSHDClientCommandProcessor(ClientCommandProcessor):
         "moon_jump":       "cheat_moon_jump",
         "beetle":          "cheat_infinite_beetle",
         "loftwing":        "cheat_infinite_loftwing",
+        "no_electric_stun": "cheat_no_electric_stun",
     }
     
     def __init__(self, ctx: CommonContext):
@@ -1405,6 +1411,7 @@ class SSHDContext(CommonContext):
         self.cheat_moon_jump: bool = False
         self.cheat_infinite_beetle: bool = False
         self.cheat_infinite_loftwing: bool = False
+        self.cheat_no_electric_stun: bool = False
         self.cheat_speed_multiplier: float = 1.0  # 1.0 = normal
         self.default_forward_speed: Optional[float] = None  # Cached normal speed
         self.beetle_patch_applied: bool = False  # Track if beetle code patch was written
@@ -1521,6 +1528,7 @@ class SSHDContext(CommonContext):
         self.cheat_moon_jump                = bool(game_section.get('cheat_moon_jump', False))
         self.cheat_infinite_beetle          = bool(game_section.get('cheat_infinite_beetle', False))
         self.cheat_infinite_loftwing        = bool(game_section.get('cheat_infinite_loftwing', False))
+        self.cheat_no_electric_stun         = bool(game_section.get('cheat_no_electric_stun', False))
         self.beetle_patch_applied = False
 
         speed_raw = game_section.get('cheat_speed_multiplier', 10)
@@ -1539,6 +1547,7 @@ class SSHDContext(CommonContext):
         if self.cheat_moon_jump:                active.append("Moon Jump")
         if self.cheat_infinite_beetle:          active.append("Infinite Beetle")
         if self.cheat_infinite_loftwing:        active.append("Infinite Loftwing")
+        if self.cheat_no_electric_stun:         active.append("No Electric Stun")
         if self.cheat_speed_multiplier != 1.0:  active.append(f"Speed x{self.cheat_speed_multiplier:.1f}")
         if active:
             logger.info(f"Cheats loaded from YAML: {', '.join(active)}")
@@ -1739,6 +1748,7 @@ class SSHDContext(CommonContext):
             self.cheat_moon_jump = bool(slot_data.get("option_cheat_moon_jump", 0))
             self.cheat_infinite_beetle = bool(slot_data.get("option_cheat_infinite_beetle", 0))
             self.cheat_infinite_loftwing = bool(slot_data.get("option_cheat_infinite_loftwing", 0))
+            self.cheat_no_electric_stun = bool(slot_data.get("option_cheat_no_electric_stun", 0))
             self.beetle_patch_applied = False  # Reset so patch is re-applied on reconnect
             # Speed multiplier: stored as integer x10 (10=1.0x, 20=2.0x, etc.)
             speed_raw = slot_data.get("option_cheat_speed_multiplier", 10)
@@ -1756,6 +1766,7 @@ class SSHDContext(CommonContext):
             if self.cheat_moon_jump: active_cheats.append("Moon Jump")
             if self.cheat_infinite_beetle: active_cheats.append("Infinite Beetle")
             if self.cheat_infinite_loftwing: active_cheats.append("Infinite Loftwing")
+            if self.cheat_no_electric_stun: active_cheats.append("No Electric Stun")
             if self.cheat_speed_multiplier != 1.0: active_cheats.append(f"Speed x{self.cheat_speed_multiplier:.1f}")
             if active_cheats:
                 logger.info(f"Cheats enabled: {', '.join(active_cheats)}")
@@ -2331,7 +2342,7 @@ class SSHDContext(CommonContext):
     
     def _apply_cheats(self):
         """
-        Apply active cheats by writing to game memory each tick.
+        Apply active cheats e memory each tick.
         Called from cheat_loop_task() ~60 times per second.
         Each cheat is wrapped in its own try/except so one failure
         cannot prevent the others from running.
@@ -2360,7 +2371,8 @@ class SSHDContext(CommonContext):
             self.cheat_infinite_skyward_strike or self.cheat_infinite_rupees or
             self.cheat_moon_jump or
             self.cheat_infinite_beetle or
-            self.cheat_infinite_loftwing or self.cheat_speed_multiplier != 1.0
+            self.cheat_infinite_loftwing or self.cheat_no_electric_stun or
+            self.cheat_speed_multiplier != 1.0
         )
         if not any_cheat:
             return
@@ -2551,6 +2563,16 @@ class SSHDContext(CommonContext):
                         self.memory.write_float(player_base + OFFSET_FORWARD_SPEED, new_speed)
             except Exception as e:
                 logger.debug(f"Cheat error (speed): {e}")
+
+        # --- No Electric Stun ---
+        if self.cheat_no_electric_stun:
+            try:
+                self.memory.write_short(player_base + OFFSET_SHOCK_EFFECT_TIMER, 0)
+                current_action = self.memory.read_int(player_base + OFFSET_CURRENT_ACTION)
+                if current_action is not None and current_action in (ACTION_DAMAGE_ELECTRIC, ACTION_ELECTRICUTED):
+                    self.memory.write_int(player_base + OFFSET_CURRENT_ACTION, ACTION_HIT_BY_ENEMY)
+            except Exception as e:
+                logger.debug(f"Cheat error (no electric stun): {e}")
 
     # ================================================================
     # AP Memory Buffers: Item Info Table + Check Stats
