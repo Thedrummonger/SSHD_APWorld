@@ -67,9 +67,28 @@ class GameOffsets:
 # but having both guards is harmless and the Python check lets us skip
 # the buffer write entirely (faster retry).
 BUSY_PLAYER_ACTIONS = frozenset([
+    0x12,  # DIVE_SKY  (diving from sky to surface)
+    0x13,  # FREE_FALL
+    0x14,  # FALLING
+    0x26,  # VINES_USING_CLAWS
+    0x40,  # PICK_UP
+    0x41,  # THROWING
+    0x43,  # HOLDING
+    0x45,  # USE_BOW
+    0x46,  # USE_SLINGSHOT
     0x4A,  # DIE
     0x4B,  # REVIVE
     0x58,  # INTERACT
+    0x59,  # USE_CLAWSHOTS
+    0x5A,  # BEING_PULLED_BY_CLAWS
+    0x5B,  # HANG_FROM_PEAHAT
+    0x5C,  # HANG_FROM_PEAHAT_USE_CLAWS_
+    0x5D,  # HANG_FROM_TARGET
+    0x5E,  # HANG_FROM_TARGET_USE_CLAWS_
+    0x5F,  # USE_BEETLE  (controlling beetle in flight)
+    0x60,  # FINAL_BLOW
+    0x61,  # FINAL_BLOW_FINISH
+    0x69,  # USE_BELLOWS
     0x6E,  # USING_DOOR
     0x6F,  # USE_DDOOR
     0x77,  # ZEV_EVENT_MAYBE  (cutscene / event)
@@ -77,9 +96,19 @@ BUSY_PLAYER_ACTIONS = frozenset([
     0x7B,  # RELATED_TO_NEW_SWORD_IN_CS_
     0x7D,  # OPEN_CHEST
     0x86,  # SWORD_IN_DIAL
+    0x87,  # ENTER_MINECART
+    0x88,  # LEAVE_MINECART
+    0x89,  # IN_TRUCK_MINECART
     0x8A,  # ON_BIRD  (flying Loftwing)
+    0x8B,  # BIRD_REACH_FOR_STATUETTE
+    0x8D,  # USE_WHIP
+    0x8E,  # WHIP_LOCKED
     0x91,  # RECEIVE_GODDESS_FRUIT
     0x93,  # SLEEPING
+    0x94,  # USE_BUGNET_CATCH
+    0x95,  # IN_GROOSENATOR
+    0x96,  # LAUNCH_FROM_GROOSENATOR
+    0x99,  # IN_BOAT
     0xAF,  # PLACE_TABLET
     0xB4,  # ENTER_GODDESS_WALL
     0xB6,  # EXIT_GODDESS_WALL
@@ -105,6 +134,16 @@ class GameItemSystem:
         self.base_address = getattr(memory_accessor, 'base_address', None)
         self.buffer_addr = None  # Will be found dynamically
         self.timeout_frames = 900  # 15 seconds at 60 FPS polling rate — must cover Rust stage-transition cooldown (90 game frames) + retry window (300 game frames)
+        
+        # Stage-transition cooldown (mirrors Rust-side protection).
+        # When the Python client detects a stage change it blocks item
+        # delivery for a few seconds so the game has time to finish
+        # loading rooms/actors/heaps.  Without this, buffer writes that
+        # land during the transition are consumed by the Rust loop but
+        # the spawned actor is destroyed when the old scene unloads.
+        self._last_known_stage: Optional[bytes] = None
+        self._stage_cooldown_until: float = 0.0
+        self._STAGE_COOLDOWN_SECS: float = 3.0  # seconds after a stage change
         
         # Buffer address cycling: store ALL valid candidate addresses
         self._candidate_buffer_addrs: list = []  # All prescan hits with valid magic
@@ -364,54 +403,48 @@ class GameItemSystem:
             if self.buffer_addr is None:
                 logger.debug("Buffer address not found — skipping buffer path")
             else:
-                # Wait for the player to be ready (not in a busy action).
-                # Instead of immediately falling back to direct-flag-write when
-                # the player is busy, we retry for up to ~10 seconds.  This
-                # ensures the player sees the item-get animation and textbox
-                # for every AP item instead of having it silently added to
-                # inventory.
-                import time as _time
-                _BUSY_WAIT_MAX = 600  # ~10 s at 60 FPS polling rate
-                _busy_waited = 0
-                while not self._is_player_ready():
-                    _busy_waited += 1
-                    if _busy_waited >= _BUSY_WAIT_MAX:
-                        logger.info("Player busy timeout — falling back to direct flag write")
-                        break
-                    _time.sleep(1 / 60)
+                # Check if the player is ready (not in a busy action).
+                # Instead of a synchronous busy-wait (which blocks the
+                # async event loop and prevents websocket pings/GUI), do
+                # a single check and return False immediately if busy.
+                # The caller's item queue will retry on the next tick.
+                if not self._is_player_ready():
+                    return False
+                
+                # Player is ready — proceed with buffer write
+                slot = self._find_empty_buffer_slot()
+                if slot is None:
+                    logger.debug("Item buffer full — skipping buffer path")
                 else:
-                    # Player is ready — proceed with buffer write
-                    slot = self._find_empty_buffer_slot()
-                    if slot is None:
-                        logger.debug("Item buffer full — skipping buffer path")
+                    # Prepare flags
+                    flags = 0
+                    if show_animation:
+                        flags |= 0x01
+                    if play_jingle:
+                        flags |= 0x02
+                    
+                    # Write to buffer ATOMICALLY using a single 16-bit write.
+                    buffer_offset = self.buffer_addr + (slot * GameOffsets.ARCHIPELAGO_BUFFER_SLOT_SIZE)
+                    slot_value = item_id | (flags << 8)  # little-endian: [item_id, flags]
+                    if self.memory.write_short(buffer_offset, slot_value):
+                        logger.info(f"Wrote item {item_id} to buffer slot {slot} with flags {flags:02x}")
+                        logger.info(f"Buffer address: base+0x{self.buffer_addr:x} = 0x{self.memory.base_address + self.buffer_addr:x}")
+                        buffer_success = self._wait_for_item_processed(
+                            buffer_offset, expected_item_id=item_id
+                        )
                     else:
-                        # Prepare flags
-                        flags = 0
-                        if show_animation:
-                            flags |= 0x01
-                        if play_jingle:
-                            flags |= 0x02
-                        
-                        # Write to buffer ATOMICALLY using a single 16-bit write.
-                        buffer_offset = self.buffer_addr + (slot * GameOffsets.ARCHIPELAGO_BUFFER_SLOT_SIZE)
-                        slot_value = item_id | (flags << 8)  # little-endian: [item_id, flags]
-                        if self.memory.write_short(buffer_offset, slot_value):
-                            logger.info(f"Wrote item {item_id} to buffer slot {slot} with flags {flags:02x}")
-                            logger.info(f"Buffer address: base+0x{self.buffer_addr:x} = 0x{self.memory.base_address + self.buffer_addr:x}")
-                            buffer_success = self._wait_for_item_processed(
-                                buffer_offset, expected_item_id=item_id
-                            )
-                        else:
-                            logger.warning(f"Failed to write item {item_id} to buffer slot {slot}")
+                        logger.warning(f"Failed to write item {item_id} to buffer slot {slot}")
         except Exception as exc:
             logger.warning(f"Buffer delivery error for item {item_id}: {exc}")
         
-        # ---- Path 2: Direct-flag fallback (ALWAYS runs) ---------------------
-        # Setting the item flag directly in save memory guarantees the item
-        # reaches the player's inventory regardless of what happened above.
-        # If the Rust spawn DID work, the flag is already set and this is a
-        # harmless no-op.
-        flag_confirmed = self._ensure_itemflag_set(item_id)
+        # ---- Path 2: Direct-flag fallback (only when buffer failed) --------
+        # If the buffer path succeeded, the game's item actor will set the
+        # flag itself during stateGet.  Writing the flag here would race
+        # with the actor's determineFinalItemid call and cause progressive
+        # items (especially swords) to resolve to the wrong tier.
+        flag_confirmed = False
+        if not buffer_success:
+            flag_confirmed = self._ensure_itemflag_set(item_id)
         
         # ---- Track consecutive buffer failures for address cycling ----------
         if buffer_success:
@@ -644,6 +677,30 @@ class GameItemSystem:
                 logger.debug("Player not ready: Buffer not found")
                 return False
         
+        # ---- Stage-transition cooldown ------------------------------------
+        # Detect stage changes by reading the current stage name.  If it
+        # changed since the last check, impose a cooldown so the engine
+        # finishes loading rooms, OARCs and heaps before we spawn items.
+        try:
+            stage_bytes = self.memory.read_bytes(
+                GameOffsets.CURRENT_STAGE_NAME, 8
+            )
+            if stage_bytes is not None:
+                if self._last_known_stage is None:
+                    self._last_known_stage = stage_bytes
+                elif stage_bytes != self._last_known_stage:
+                    self._last_known_stage = stage_bytes
+                    self._stage_cooldown_until = time.time() + self._STAGE_COOLDOWN_SECS
+                    logger.debug(
+                        f"Stage transition detected — cooldown until "
+                        f"{self._stage_cooldown_until:.1f}"
+                    )
+            if time.time() < self._stage_cooldown_until:
+                logger.debug("Player not ready: stage-transition cooldown active")
+                return False
+        except Exception as e:
+            logger.debug(f"Could not read stage name: {e}")
+        
         # ---- Player action busy-state check --------------------------------
         # Read the player's current action and reject if it's one of the
         # "busy" states where giving an item would be lost or cause issues.
@@ -651,10 +708,16 @@ class GameItemSystem:
             action_offset = GameOffsets.PLAYER + GameOffsets.PLAYER_CURRENT_ACTION
             current_action = self.memory.read_int(action_offset)
             if current_action is not None and current_action in BUSY_PLAYER_ACTIONS:
-                logger.debug(
-                    f"Player not ready: current action 0x{current_action:X} is busy"
-                )
+                # Log only every 60th call (~once per second) to avoid spam
+                self._busy_log_counter = getattr(self, '_busy_log_counter', 0) + 1
+                if self._busy_log_counter % 60 == 1:
+                    logger.debug(
+                        f"Player not ready: current action 0x{current_action:X} is busy"
+                    )
                 return False
+            else:
+                self._busy_log_counter = 0
+                return True
         except Exception as e:
             # If we can't read the action, err on the side of caution and
             # allow the item — the Rust-side busy check is the real safety net.
@@ -798,6 +861,68 @@ class GameItemSystem:
                 logger.warning(f"[DirectFlag] Could not write flag {flag_id}: {exc}")
 
         return confirmed
+
+    def _clear_itemflag(self, item_id: int) -> bool:
+        """Clear (unset) the itemflag for the given item in both flag copies.
+
+        Mirrors _ensure_itemflag_set but ANDs with ~mask instead of ORing.
+        Used to clean up stale progressive flags before re-presetting the
+        correct state so determineFinalItemid resolves to the right tier.
+        """
+        if not self.memory or not self.memory.connected:
+            return False
+        if item_id > 215:
+            return True
+
+        flag_id = item_id
+        word_idx = flag_id // 16
+        bit_idx = flag_id % 16
+        byte_off = word_idx * 2
+        mask = 1 << bit_idx
+
+        cleared = False
+        bases = (GameOffsets.FA_ITEMFLAGS, GameOffsets.STATIC_ITEMFLAGS)
+        for base in bases:
+            try:
+                current = self.memory.read_short(base + byte_off)
+                if current is None:
+                    continue
+                if current & mask:
+                    new_val = current & (~mask & 0xFFFF)
+                    self.memory.write_short(base + byte_off, new_val)
+                    verify = self.memory.read_short(base + byte_off)
+                    if verify is not None and not (verify & mask):
+                        logger.info(
+                            f"[DirectFlag] Cleared itemflag {flag_id} "
+                            f"(word {word_idx}, bit {bit_idx}) at base 0x{base:x} "
+                            f"[verified]"
+                        )
+                        cleared = True
+                    else:
+                        logger.warning(
+                            f"[DirectFlag] Clear of flag {flag_id} at 0x{base:x} "
+                            f"did NOT stick!"
+                        )
+                else:
+                    cleared = True  # already clear
+            except Exception as exc:
+                logger.warning(f"[DirectFlag] Could not clear flag {flag_id}: {exc}")
+        return cleared
+
+    def _read_itemflags_word(self, word_idx: int) -> tuple:
+        """Read a u16 word from both flag copies. Returns (fa_val, static_val)."""
+        byte_off = word_idx * 2
+        fa_val = None
+        static_val = None
+        try:
+            fa_val = self.memory.read_short(GameOffsets.FA_ITEMFLAGS + byte_off)
+        except Exception:
+            pass
+        try:
+            static_val = self.memory.read_short(GameOffsets.STATIC_ITEMFLAGS + byte_off)
+        except Exception:
+            pass
+        return (fa_val, static_val)
 
     def clear_buffer(self):
         """Clear all slots in item buffer."""

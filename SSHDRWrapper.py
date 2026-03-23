@@ -273,31 +273,11 @@ def create_sshd_rando_config(settings_dict: Dict[str, Any], output_dir: Path, se
             setting_map.excluded_locations = excluded_locs_list
             print(f"[SSHDRWrapper] Excluded {len(excluded_locs_list)} locations from randomization")
     
-    # CRITICAL FIX: Remove Beedle's Airshop locations from excluded_locations if beedle_shop_shuffle is not vanilla
-    # The default excluded_locations includes these shops, but they should only be excluded when shuffle is vanilla
-    beedle_shop_mode = settings_dict.get("beedle_shop_shuffle", "vanilla")
-    if beedle_shop_mode != "vanilla":
-        beedle_shop_locations = [
-            "Beedle's Airshop - 50 Rupee Item",
-            "Beedle's Airshop - First 100 Rupee Item",
-            "Beedle's Airshop - Second 100 Rupee Item",
-            "Beedle's Airshop - Third 100 Rupee Item",
-            "Beedle's Airshop - 300 Rupee Item",
-            "Beedle's Airshop - 600 Rupee Item",
-            "Beedle's Airshop - 800 Rupee Item",
-            "Beedle's Airshop - 1000 Rupee Item",
-            "Beedle's Airshop - 1200 Rupee Item",
-            "Beedle's Airshop - 1600 Rupee Item",
-        ]
-        # Remove shop locations from excluded list
-        original_count = len(setting_map.excluded_locations)
-        setting_map.excluded_locations = [
-            loc for loc in setting_map.excluded_locations
-            if loc not in beedle_shop_locations
-        ]
-        removed_count = original_count - len(setting_map.excluded_locations)
-        if removed_count > 0:
-            print(f"[SSHDRWrapper] Removed {removed_count} Beedle's Airshop locations from excluded_locations (beedle_shop_shuffle={beedle_shop_mode})")
+    # NOTE: excluded_locations from config.yaml always have the highest priority.
+    # Even if a shuffle setting (like beedle_shop_shuffle) is turned on, individually
+    # excluded locations remain vanilla.  We no longer strip Beedle locations from
+    # the excluded list when the shop shuffle is enabled — the user's explicit
+    # exclusions must be respected.
     
     # NOTE: excluded_hint_locations is NOT used in Archipelago mode
     # Archipelago disables all hints (overrides all hint counts to 0), so there's no need
@@ -318,11 +298,14 @@ def create_sshd_rando_config(settings_dict: Dict[str, Any], output_dir: Path, se
                 setting_map.mixed_entrance_pools = mixed_pools
     
     # Handle starting_sword (add Progressive Sword based on level)
-    # NOTE: Only do this if we're using Archipelago YAML settings (not from config.yaml)
-    if "starting_sword" in settings_dict and "starting_inventory" not in settings_dict:
+    # Always add to setting_map.starting_inventory so that
+    # world.starting_item_pool includes the sword for AP extraction.
+    # (sshd-rando's item_pool.py handles its own fill separately but
+    # that local dict is NOT what AP reads for precollected items.)
+    if "starting_sword" in settings_dict:
         sword_value = settings_dict["starting_sword"]
         sword_levels = {
-            "none": 0,
+            "none": 0, "no_sword": 0,
             "practice_sword": 1,          # Progressive Sword x1
             "goddess_sword": 2,           # Progressive Sword x2
             "goddess_longsword": 3,       # Progressive Sword x3
@@ -335,7 +318,9 @@ def create_sshd_rando_config(settings_dict: Dict[str, Any], output_dir: Path, se
         else:
             sword_level = sword_levels.get(str(sword_value), 0)
         if sword_level > 0:
-            setting_map.starting_inventory["Progressive Sword"] = sword_level
+            existing = setting_map.starting_inventory.get("Progressive Sword", 0)
+            setting_map.starting_inventory["Progressive Sword"] = existing + sword_level
+            print(f"[SSHDRWrapper] Starting sword '{sword_value}' -> Progressive Sword x{sword_level} (total: {existing + sword_level})")
     
 
 

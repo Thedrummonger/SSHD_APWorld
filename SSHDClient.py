@@ -400,6 +400,27 @@ _ELDIN_STAGES = {"F200", "F201", "F201_3", "F210", "F211", "D201"}
 # Stages where Faron story-flag statues (800-803) may legitimately activate.
 _FARON_STAGES = {"F100", "F101", "F102", "F102_1", "F103", "F401", "F400"}
 
+# Entry bird statues — the first statue the player is supposed to reach
+# when diving into each surface region.  These are auto-enabled on the
+# player's first visit to the region so they always have a spawn point.
+_REGION_ENTRY_STATUES: dict[str, str] = {
+    "faron":  "Faron Woods Entry Statue",     # story flag 800
+    "eldin":  "Volcano Entrance Statue",      # story flag 804
+    "lanayru": "Lanayru Mine Entry Statue",   # scene flag (7, 68)
+}
+
+def _stage_to_region(stage: str) -> Optional[str]:
+    """Return the region key ('faron', 'eldin', 'lanayru') for a stage code,
+    or None if the stage is not in a surface region."""
+    prefix = stage[:4] if stage else ""
+    if prefix in ("F100", "F101", "F102", "F103", "F401", "F400"):
+        return "faron"
+    if prefix in ("F200", "F201", "F210", "F211", "D201"):
+        return "eldin"
+    if prefix in ("F300", "F301", "F302"):
+        return "lanayru"
+    return None
+
 # Scene name to scene flag base address mapping (base-relative offsets for SSHD)
 # These are the offsets from base_address where scene flags are stored
 # Scene flags are organized by scene in the static scene flag array
@@ -524,7 +545,7 @@ class RyujinxMemoryReader:
         self._total_ops: int = 0
         self._total_failures: int = 0
         self._last_successful_op: float = 0.0
-        self._error_log_time: float = 0.0
+        self._error_log_time: float = time.time()
         self._errors_since_log: int = 0
         # Negative cache: buffer name -> timestamp of last failed full scan
         self._scan_negative_cache: Dict[str, float] = {}
@@ -865,7 +886,7 @@ class RyujinxMemoryReader:
                                         if score > best_score:
                                             best_score = score
                                             best_base = candidate
-                                        if best_score >= 6:
+                                        if best_score >= 8:
                                             break
                                 elif scan_pos + prefix_start >= 0:
                                     # Prefix spans into previous chunk — read
@@ -880,13 +901,13 @@ class RyujinxMemoryReader:
                                             if score > best_score:
                                                 best_score = score
                                                 best_base = candidate
-                                            if best_score >= 6:
+                                            if best_score >= 8:
                                                 break
                                     except Exception:
                                         pass
 
-                                # High-confidence match — stop scanning immediately
-                                if best_score >= 6:
+                                # Perfect match — stop scanning immediately
+                                if best_score >= 8:
                                     break
 
                                 search_offset = needle_off + 1
@@ -894,13 +915,13 @@ class RyujinxMemoryReader:
                         except Exception:
                             pass  # skip unreadable sub-chunks within this region
 
-                        # Stop reading more chunks once we have a high-confidence match
-                        if best_score >= 6:
+                        # Stop reading more chunks once we have a perfect match
+                        if best_score >= 8:
                             break
                         scan_pos += to_read
 
-                    # Early exit once we have a high-confidence base
-                    if best_score >= 6:
+                    # Early exit once we have a perfect base
+                    if best_score >= 8:
                         break
 
                 tier_elapsed = time.time() - tier_start
@@ -920,10 +941,15 @@ class RyujinxMemoryReader:
                 logger.error("Could not find SSHD signature in memory")
                 return False
             
-            print(f"[SUCCESS] Selected base address: 0x{best_base:X} (score: {best_score}/8)")
+            if best_score < 8:
+                print(f"[FAIL] Best candidate 0x{best_base:X} scored {best_score}/8 (need 8/8)")
+                logger.error(
+                    f"Base address candidate 0x{best_base:X} scored only {best_score}/8 — "
+                    f"rejecting (8/8 required). Game may still be loading."
+                )
+                return False
             
-            if best_score < 3:
-                logger.warning(f"Base address has low validation score ({best_score}/8) - may be incorrect")
+            print(f"[SUCCESS] Selected base address: 0x{best_base:X} (score: {best_score}/8)")
             
             self.base_address = best_base
 
@@ -1035,21 +1061,24 @@ class RyujinxMemoryReader:
                     logging.debug(f"[PRESCAN] {mname}: no hits")
 
             # ------------------------------------------------------------------
-            # Post-scan sanity check: if the prescan found ZERO magic buffer
-            # hits in ±2 GB around the base address and the score wasn't
-            # perfect, the base is very likely a false positive (e.g. a stale
-            # signature copy left in an unrelated heap region).  Log an
-            # explicit warning so the health monitor knows to expect trouble.
+            # Post-scan validation: ALL three magic buffers must be found.
+            # If any are missing, the base address is likely a stale copy or
+            # the game hasn't finished initialising its Rust statics yet.
+            # Returning False triggers a rescan on the next attempt.
             # ------------------------------------------------------------------
-            all_empty = all(len(v) == 0 for v in magic_hits.values())
-            if all_empty and best_score < 8:
-                logger.warning(
-                    f"Base address 0x{best_base:X} scored only {best_score}/8 "
-                    f"and no Rust magic buffers (IT/CS/AP) were found nearby. "
-                    f"This may be a stale/false-positive signature. "
-                    f"The health monitor will rescan automatically if "
-                    f"subsequent memory operations keep failing."
+            missing_buffers = [name for name, addrs in magic_hits.items() if not addrs]
+            if missing_buffers:
+                print(
+                    f"[FAIL] Base 0x{best_base:X} (8/8) but missing magic buffers: "
+                    f"{', '.join(missing_buffers)}"
                 )
+                logger.error(
+                    f"Base address 0x{best_base:X} scored 8/8 but could not find "
+                    f"all required magic buffers ({', '.join(missing_buffers)} missing). "
+                    f"Game may still be loading. Will retry."
+                )
+                self.base_address = None
+                return False
 
             logger.info(f"Found SSHD base address: 0x{best_base:X} (score: {best_score}/8, took {total_elapsed:.1f}s)")
             
@@ -1329,6 +1358,26 @@ class SSHDContext(CommonContext):
             "Progressive Pouch": 0,
         }
         
+        # Deferred flag writes — no longer used.
+        # The game's own item actor stateGet handles flag management
+        # through the FlagMgr vtable, which Python cannot directly
+        # access.  Kept as empty list for API compatibility.
+        self._deferred_flag_writes: list = []
+        self._DEFERRED_FLAG_DELAY = 2.0  # seconds (unused, kept for reference)
+        
+        # Game item IDs for each progressive tier (kept for reference;
+        # the game's determineFinalItemid resolves tiers natively).
+        self._PROGRESSIVE_TIER_FLAGS = {
+            "Progressive Sword":     [10, 11, 12, 9, 13, 14],
+            "Progressive Bow":       [19, 90, 91],
+            "Progressive Slingshot": [52, 105],
+            "Progressive Beetle":    [53, 75, 76, 77],
+            "Progressive Mitts":     [56, 99],
+            "Progressive Bug Net":   [71, 140],
+            "Progressive Wallet":    [108, 109, 110, 111],
+            "Progressive Pouch":     [112, 113, 113, 113, 113],
+        }
+        
         # Game state tracking
         self.current_stage: Optional[str] = None
         self.last_stage: Optional[str] = None
@@ -1378,6 +1427,7 @@ class SSHDContext(CommonContext):
         # key = statue name, value = True if the statue's activation flag is set.
         self._bird_statue_snapshot: Optional[Dict[str, bool]] = None
         self._bird_statue_enforcement_log: Set[str] = set()  # avoid log spam
+        self._visited_regions: Set[str] = set()  # regions where entry statue was auto-enabled
         
         # Tracker bridge for autotracking
         self.tracker_bridge = TrackerBridge() if TrackerBridge else None
@@ -1954,38 +2004,37 @@ class SSHDContext(CommonContext):
                 if not self.game_item_system:
                     self.game_item_system = GameItemSystem(self.memory)
                 
-                # For progressive items, always send the PROGRESSIVE BASE ID to
-                # the game buffer.  The Rust code's resolve_progressive_item_models()
-                # handles model selection for progressive IDs (10, 19, 53, etc.)
-                # correctly, dynamically picking the right model based on current
-                # inventory flags.  Sending concrete stage IDs (e.g. 14 for True
-                # Master Sword, 90 for Iron Bow) breaks because:
-                #  - Concrete IDs may have oarc: null (swords) → green rupee fallback
-                #  - Concrete IDs may need arcs not loaded in the current stage
-                #    (bow, beetle) → invisible/missing model
-                buffer_item_name = item_name if is_progressive else actual_item_name
+                # For progressive items, send the CONCRETE tier game ID to
+                # the buffer — NOT the base progressive ID.
+                #
+                # Buffer-spawned item actors do NOT set itemflags via
+                # FlagMgr, so determineFinalItemid always sees the same
+                # flag state and returns the same tier forever.  By
+                # sending the concrete ID (e.g. 11 for Goddess Sword
+                # instead of 10 for Progressive Sword), we bypass the
+                # broken progressive resolution entirely.  Python
+                # tracks tier counts independently.
+                if is_progressive:
+                    tier_ids = self._PROGRESSIVE_TIER_FLAGS.get(item_name)
+                    if tier_ids:
+                        concrete_id = tier_ids[min(next_count - 1, len(tier_ids) - 1)]
+                        logger.debug(f"[Progressive] Sending concrete game_id {concrete_id} for {item_name} #{next_count} ({actual_item_name})")
+                        success = self.game_item_system.give_item(concrete_id)
+                    else:
+                        # Unknown progressive — fall back to name lookup
+                        success = self.game_item_system.give_item_by_name(item_name)
+                else:
+                    success = self.game_item_system.give_item_by_name(actual_item_name)
                 
-                # Use the integrated system (spawns items with animations)
-                success = self.game_item_system.give_item_by_name(buffer_item_name)
                 if success:
                     # Only commit the progressive counter increment on success
-                    # so retries don't skip tiers
+                    # so retries don't skip tiers.
                     if is_progressive:
                         self.progressive_counts[item_name] = next_count
-                        
-                        # For tier 2+ progressive items, the buffer used the
-                        # progressive base ID (which sets the base flag, e.g.
-                        # BOW for id=19).  We also need to set the concrete
-                        # tier's flag (e.g. IRON_BOW for id=90) so the game
-                        # recognises the upgraded item in inventory.
-                        if actual_item_name != buffer_item_name and actual_item_name in ITEM_TABLE:
-                            concrete_data = ITEM_TABLE[actual_item_name]
-                            self.game_item_system._ensure_itemflag_set(concrete_data.original_id)
-                            logger.debug(f"Set concrete tier flag: {actual_item_name} (id={concrete_data.original_id})")
                     
-                    logger.debug(f"Gave {buffer_item_name} via item buffer (game will handle animation)")
+                    logger.debug(f"Gave {actual_item_name} via item buffer (game will handle animation)")
                 else:
-                    logger.debug(f"Failed to give {buffer_item_name} via item system (player may be busy)")
+                    logger.debug(f"Failed to give {actual_item_name} via item system (player may be busy)")
                 return success
             except Exception as e:
                 logger.warning(f"Item system error for {actual_item_name}: {e}")
@@ -1993,6 +2042,12 @@ class SSHDContext(CommonContext):
         else:
             logger.error("GameItemSystem not available. Cannot give item.")
             return False
+
+    def _process_deferred_flag_writes(self):
+        """No-op.  Flag management is now handled entirely by the game's
+        own item actor stateGet through the FlagMgr vtable.  Python-side
+        writes to STATIC_ITEMFLAGS do not affect determineFinalItemid."""
+        pass
 
     async def ryujinx_connection_task(self):
         """Background task to maintain connection to Ryujinx."""
@@ -2051,6 +2106,8 @@ class SSHDContext(CommonContext):
                     self.previous_custom_flags.clear()
                     self._bird_statue_snapshot = None
                     self._bird_statue_enforcement_log.clear()
+                    self._visited_regions.clear()
+                    self._deferred_flag_writes.clear()
 
                     # Immediately attempt a new base-address scan instead of
                     # waiting for the next cycle (which would spin doing
@@ -2110,10 +2167,27 @@ class SSHDContext(CommonContext):
             if stage_name != self.current_stage:
                 logger.debug(f"Entered stage: {stage_name}")
                 self.current_stage = stage_name
+                
+                # Auto-enable the entry bird statue when first visiting a
+                # surface region so the player always has a spawn point.
+                region = _stage_to_region(stage_name)
+                if region and region not in self._visited_regions:
+                    self._visited_regions.add(region)
+                    entry_name = _REGION_ENTRY_STATUES.get(region)
+                    if entry_name and self._bird_statue_snapshot is not None:
+                        if not self._bird_statue_snapshot.get(entry_name, False):
+                            self._bird_statue_snapshot[entry_name] = True
+                            logger.info(
+                                f"[BirdStatue] Auto-enabled entry statue: {entry_name} "
+                                f"(first visit to {region})"
+                            )
             
             # Write AP buffers to game memory (item info table + check stats)
             self._write_ap_item_info_table()
             self._update_ap_check_stats()
+            
+            # Process deferred progressive-item flag writes
+            self._process_deferred_flag_writes()
             
             # Give queued items to player
             if self.item_queue:
@@ -3294,6 +3368,14 @@ class SSHDContext(CommonContext):
                     legitimate = True
                 elif ftype == "story" and fnum in range(804, 808) and in_eldin:
                     legitimate = True
+                
+                # Entry statues are always legitimate — the player needs
+                # a spawn point when diving into a region for the first time.
+                if not legitimate:
+                    for region_key, entry_name in _REGION_ENTRY_STATUES.items():
+                        if name == entry_name and region_key in self._visited_regions:
+                            legitimate = True
+                            break
 
                 if legitimate:
                     self._bird_statue_snapshot[name] = True
@@ -3538,10 +3620,17 @@ def install_patch(patch_file_path: str) -> tuple[bool, dict]:
             print(f"  - exefs/: {'YES' if has_exefs else 'NO'}")
             
             if not has_romfs and not has_exefs:
-                print(f"\nWARNING: No game mod files found in patch!")
-                print(f"This patch only contains item/location data.")
-                print(f"You may need to apply the base randomizer mod manually.")
-                return False
+                has_patcher_data = 'patcher_data.json' in file_list
+                if has_patcher_data:
+                    print(f"\nThis .apsshd does not contain ROM patches (lightweight patch file).")
+                    print(f"Use the standalone patcher to generate patches from your own ROM:")
+                    print(f"    ArchipelagoSSHDPatcher.exe \"{patch_file_path}\"")
+                    print(f"\nOr double-click the .apsshd file in Archipelago to auto-patch.")
+                else:
+                    print(f"\nWARNING: No game mod files found in patch!")
+                    print(f"This patch only contains item/location data.")
+                    print(f"You may need to apply the base randomizer mod manually.")
+                return False, {}
             
             # Find Ryujinx atmosphere directory for LayeredFS mods
             try:

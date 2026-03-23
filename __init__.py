@@ -189,19 +189,57 @@ def run_client(*args: str) -> None:
         input("Press Enter to close this window...")
         return
     
-    # If launched WITH a patch file, only install the patch without opening the client
-    from .SSHDClient import install_patch
-    
+    # If launched WITH a patch file, check if it needs patching first
     patch_file = next((arg for arg in args if arg.endswith('.apsshd')), None)
     if patch_file:
-        print(f"\nInstalling patch: {patch_file}")
-        success, _ = install_patch(patch_file)
-        if success:
-            print("\n" + "=" * 60)
-            print("Patch installed successfully!")
-            print("=" * 60)
+        patch_path = Path(patch_file)
+        needs_patching = False
+        
+        # Check if the .apsshd has ROM patches or needs user-side patching
+        try:
+            with zipfile.ZipFile(patch_path, 'r') as zf:
+                has_romfs = any(n.startswith('romfs/') for n in zf.namelist())
+                has_exefs = any(n.startswith('exefs/') for n in zf.namelist())
+                has_patcher_data = 'patcher_data.json' in zf.namelist()
+                
+                if not has_romfs and not has_exefs and has_patcher_data:
+                    needs_patching = True
+        except Exception:
+            pass
+        
+        if needs_patching:
+            # Lightweight .apsshd — run the standalone patcher
+            print(f"\nThis .apsshd does not contain ROM patches.")
+            print(f"Running standalone patcher to generate patches from your ROM...\n")
+            from .SSHDPatcher import read_apsshd, generate_patches, install_to_ryujinx
+            import tempfile
+            
+            _manifest, _patch_data, _patcher_data = read_apsshd(patch_path)
+            extract_path = get_default_sshd_extract_path()
+            temp_out = Path(tempfile.mkdtemp(prefix="sshd_patch_"))
+            try:
+                romfs_path, exefs_path = generate_patches(_patcher_data, extract_path, temp_out)
+                if romfs_path and exefs_path:
+                    install_to_ryujinx(romfs_path, exefs_path)
+                    print("\n" + "=" * 60)
+                    print("Patches generated and installed successfully!")
+                    print("=" * 60)
+                else:
+                    print("\nERROR: Patch generation failed")
+            finally:
+                shutil.rmtree(temp_out, ignore_errors=True)
         else:
-            print("\nERROR: Failed to install patch")
+            # Full .apsshd with ROM patches — install directly
+            from .SSHDClient import install_patch
+            print(f"\nInstalling patch: {patch_file}")
+            success, _ = install_patch(patch_file)
+            if success:
+                print("\n" + "=" * 60)
+                print("Patch installed successfully!")
+                print("=" * 60)
+            else:
+                print("\nERROR: Failed to install patch")
+        
         input("\nPress Enter to close this window...")
 
 
@@ -302,6 +340,7 @@ class SSHDWorld(World):
     
     topology_present: bool = True
     required_client_version: tuple[int, int, int] = (0, 5, 1)
+    explicit_indirect_conditions: bool = False
     
     # Hint blacklist - locations that should not be hinted
     hint_blacklist: ClassVar[set[str]] = {
@@ -557,22 +596,51 @@ class SSHDWorld(World):
         "junk_item_rate": ("junk_item_rate", "range", None),
     }
 
-    def _sync_ap_options_from_resolved(self, resolved_settings: dict) -> None:
+    def _sync_ap_options_from_resolved(self, resolved_settings: dict,
+                                       config_settings: dict = None) -> None:
         """
-        Update self.options.* fields to match the resolved sshd-rando settings
-        so the spoiler log, fill_slot_data, and other AP subsystems display
-        the actual config.yaml values rather than Archipelago defaults.
+        Update self.options.* fields so Archipelago subsystems (pre_fill,
+        spoiler log, fill_slot_data, etc.) see the correct values.
+
+        When *config_settings* is provided (config.yaml mode) ONLY settings
+        the user explicitly put in their config.yaml are synced.  This avoids
+        overwriting AP-YAML values with sshd-rando defaults for settings the
+        user never configured in config.yaml.
+
+        For sshd-rando settings present in config.yaml, the *resolved* value
+        is preferred (so ``random`` resolutions are concrete).  AP-specific
+        settings that sshd-rando does not know about (e.g. ``triforce_shuffle``)
+        are read directly from config.yaml.
+
+        When *config_settings* is ``None`` (AP-YAML-only mode) every setting
+        found in *resolved_settings* is synced (backward-compatible path used
+        for ``random`` resolution of AP-YAML options).
         """
         synced = 0
+        # Keys the user explicitly provided in their config.yaml.
+        # If None we are in AP-YAML-only mode — treat all resolved keys as explicit.
+        explicit_keys: set | None = set(config_settings.keys()) if config_settings else None
+
         for config_key, (ap_field, mapping_type, value_map) in self._CONFIG_TO_AP_OPTION.items():
-            if config_key not in resolved_settings:
+            # Determine the raw value to sync.
+            raw = None
+            if config_key in resolved_settings:
+                # sshd-rando resolved this setting (handles 'random' → concrete).
+                # Only use it if the user asked for it OR we are in AP-YAML mode.
+                if explicit_keys is None or config_key in explicit_keys:
+                    raw = resolved_settings[config_key]
+            # Fallback: AP-specific settings in config.yaml that sshd-rando
+            # doesn't know about (e.g. triforce_shuffle, triforce_required).
+            if raw is None and config_settings and config_key in config_settings:
+                raw = config_settings[config_key]
+
+            if raw is None:
                 continue
 
             option_obj = getattr(self.options, ap_field, None)
             if option_obj is None:
                 continue
 
-            raw = resolved_settings[config_key]
             try:
                 if mapping_type == "toggle":
                     raw_s = str(raw).lower()
@@ -643,6 +711,12 @@ class SSHDWorld(World):
             print(f"[__init__.py] Full logic built successfully")
             self._using_full_logic = True
             
+            # Apply entrance randomization from the sshd-rando world object.
+            # The logic converter built vanilla topology from YAML files;
+            # now we remap shuffled entrances to match the actual randomized
+            # connections determined by sshd-rando's entrance shuffle.
+            self._apply_entrance_randomization()
+            
         except Exception as e:
             print(f"[__init__.py] WARNING: Full logic conversion failed: {e}")
             import traceback
@@ -650,6 +724,8 @@ class SSHDWorld(World):
             print(f"[__init__.py] Falling back to basic region structure...")
             self._using_full_logic = False
             self._create_basic_regions()
+            # Still apply entrance randomization even with fallback regions
+            self._apply_entrance_randomization()
     
     def _create_initial_locations(self) -> None:
         """
@@ -677,6 +753,91 @@ class SSHDWorld(World):
         # Then the converter adds locations to the correct fine-grained regions.
         # We just need to ensure all locations from LOCATION_TABLE are created.
         pass
+    
+    def _apply_entrance_randomization(self) -> None:
+        """
+        Remap AP entrances to match sshd-rando's shuffled entrance connections.
+        
+        The logic converter builds the vanilla region graph from static YAML files.
+        If entrance randomization is enabled, sshd-rando has already shuffled
+        entrances in the World object (cached in _sshd_world_cache). This method
+        reads those shuffled connections and updates the AP entrance graph so that
+        Archipelago's logic matches the actual in-game entrance layout.
+        """
+        sshd_world = getattr(self, '_sshd_world_cache', None)
+        if not sshd_world:
+            print("[__init__.py] No sshd-rando world cache available — skipping entrance rando overlay")
+            return
+        
+        if not hasattr(sshd_world, 'areas'):
+            print("[__init__.py] sshd-rando world has no areas — skipping entrance rando overlay")
+            return
+
+        # Collect all shuffled entrances from the sshd-rando world
+        shuffled_entrances = []
+        for area in sshd_world.areas.values():
+            for entrance in area.exits:
+                if entrance.shuffled:
+                    shuffled_entrances.append(entrance)
+        
+        if not shuffled_entrances:
+            return
+        
+        print(f"[__init__.py] Applying {len(shuffled_entrances)} shuffled entrance(s) to AP logic")
+        
+        # Build a lookup of AP entrances by name for efficient matching.
+        # AP entrance names follow the pattern "SourceArea -> DestArea" using
+        # the *original* (pre-shuffle) area names, matching sshd-rando's
+        # entrance.original_name format.
+        ap_entrances_by_name: dict = {}
+        for region in self.multiworld.regions:
+            if region.player != self.player:
+                continue
+            for exit_ in region.exits:
+                ap_entrances_by_name[exit_.name] = exit_
+        
+        # Build a lookup of AP regions by name
+        ap_regions: dict = {}
+        for region in self.multiworld.regions:
+            if region.player != self.player:
+                continue
+            ap_regions[region.name] = region
+        
+        remapped = 0
+        for sshd_entrance in shuffled_entrances:
+            original_name = sshd_entrance.original_name  # "ParentArea -> OriginalDest"
+            new_dest_name = sshd_entrance.connected_area.name  # New shuffled destination
+            
+            ap_entrance = ap_entrances_by_name.get(original_name)
+            if not ap_entrance:
+                continue
+            
+            new_dest_region = ap_regions.get(new_dest_name)
+            if not new_dest_region:
+                # Destination region might not exist yet — create it
+                from BaseClasses import Region
+                new_dest_region = Region(new_dest_name, self.player, self.multiworld)
+                self.multiworld.regions.append(new_dest_region)
+                ap_regions[new_dest_name] = new_dest_region
+                print(f"[__init__.py]   Created new region for shuffled dest: {new_dest_name}")
+            
+            old_dest = ap_entrance.connected_region
+            if old_dest and old_dest.name == new_dest_name:
+                continue  # Already pointing to the right place
+            
+            # Disconnect from old destination
+            if old_dest and ap_entrance in old_dest.entrances:
+                old_dest.entrances.remove(ap_entrance)
+            
+            # Connect to new destination
+            ap_entrance.connected_region = new_dest_region
+            new_dest_region.entrances.append(ap_entrance)
+            
+            old_name = old_dest.name if old_dest else "None"
+            print(f"[__init__.py]   Remapped: {original_name} => {new_dest_name} (was {old_name})")
+            remapped += 1
+        
+        print(f"[__init__.py] Entrance rando: remapped {remapped}/{len(shuffled_entrances)} entrances")
     
     def _get_excluded_item_types(self) -> set:
         """
@@ -783,8 +944,16 @@ class SSHDWorld(World):
         except (ValueError, TypeError):
             trial_treasure_num = 0
         
+        # Individually excluded locations from config.yaml always stay vanilla,
+        # regardless of what any shuffle setting says.
+        manually_excluded = getattr(self, '_sshd_excluded_locations', set())
+        
         for name, data in LOCATION_TABLE.items():
             if data.code is not None:
+                # Skip individually excluded locations (highest priority)
+                if name in manually_excluded:
+                    continue
+                
                 # Skip locations whose types are in the excluded set
                 if any(t in excluded_types for t in data.types):
                     continue
@@ -871,6 +1040,18 @@ class SSHDWorld(World):
             self._sshd_setting_string = setting_string
             self._sshd_world_cache = world  # Cache for later use in generate_output
             
+            # Store individually excluded locations from config.yaml so both
+            # the logic_converter and _create_basic_regions() paths can filter
+            # them out of the AP world.  These must stay vanilla regardless of
+            # any shuffle setting (excluded_locations has highest priority).
+            excluded_locs = ap_settings.get('excluded_locations', [])
+            if isinstance(excluded_locs, list):
+                self._sshd_excluded_locations = set(excluded_locs)
+            else:
+                self._sshd_excluded_locations = set()
+            if self._sshd_excluded_locations:
+                print(f"[__init__.py] Individually excluded locations ({len(self._sshd_excluded_locations)}): will stay vanilla")
+            
             if starting_item_dict:
                 print(f"[__init__.py] Starting items from Setting String:")
                 for item_name, count in starting_item_dict.items():
@@ -932,32 +1113,102 @@ class SSHDWorld(World):
                 if excluded_loc_types:
                     print(f"[__init__.py] Excluding location types from item pool: {sorted(excluded_loc_types)}")
                 
+                # Individually excluded locations from config.yaml — items at
+                # these locations must NOT enter the AP pool because the AP world
+                # will not have corresponding Location objects for them.
+                individually_excluded = getattr(self, '_sshd_excluded_locations', set())
+                
                 # Scan all filled locations to reconstruct the placed item pool
                 locations_excluded = 0
+                
+                # sshd-rando uses generic "Small Key" and "Map" names for all
+                # dungeon keys/maps, but Archipelago requires dungeon-specific
+                # names (e.g. "Skyview Temple Small Key", "Skyview Temple Map").
+                # Build a mapping from location region → dungeon prefix.
+                from .Locations import LOCATION_TABLE as _LOC_TABLE
+                _REGION_TO_DUNGEON = {
+                    "Skyview Temple": "Skyview Temple",
+                    "Skyview Spring": "Skyview Temple",
+                    "Earth Temple": "Earth Temple",
+                    "Earth Spring": "Earth Temple",
+                    "Lanayru Mining Facility": "Lanayru Mining Facility",
+                    "Ancient Cistern": "Ancient Cistern",
+                    "Sandship": "Sandship",
+                    "Fire Sanctuary": "Fire Sanctuary",
+                    "Sky Keep": "Sky Keep",
+                    "Lanayru Caves": "Lanayru Caves",
+                }
+                _generic_key_converted = 0
+                _generic_map_converted = 0
+                
                 if hasattr(world, 'location_table'):
+                    _items_from_excluded = []
+                    
                     for loc_name, location in world.location_table.items():
                         if hasattr(location, 'types') and "Hint Location" in location.types:
-                            continue  # Skip gossip stones
-                        # Skip locations for non-shuffled types
-                        if excluded_loc_types and hasattr(location, 'types'):
+                            continue  # Skip gossip stones — no meaningful items
+                        
+                        # Determine if this location is excluded from AP
+                        is_excluded = False
+                        if loc_name in individually_excluded:
+                            is_excluded = True
+                            locations_excluded += 1
+                        elif excluded_loc_types and hasattr(location, 'types'):
                             if any(t in excluded_loc_types for t in location.types):
+                                is_excluded = True
                                 locations_excluded += 1
-                                continue
-                        # Dusk Relic per-location check
-                        if hasattr(location, 'types') and "Dusk Relic" in location.types and not trial_treasure_is_random_early:
+                        elif hasattr(location, 'types') and "Dusk Relic" in location.types and not trial_treasure_is_random_early:
                             try:
                                 relic_num = int(loc_name.split(" ")[-1])
                             except (ValueError, IndexError):
                                 relic_num = 0
                             if relic_num > trial_treasure_num_early:
+                                is_excluded = True
                                 locations_excluded += 1
-                                continue
+                        
+                        # Always extract items — even from excluded locations.
+                        # Excluded locations won't have AP Location objects, but
+                        # their items must still enter the pool so progression
+                        # items (e.g. Water Dragon's Scale at Silent Realms)
+                        # aren't lost. create_items handles pool sizing.
                         if hasattr(location, 'current_item') and location.current_item:
                             item_name = location.current_item.name
+                            
+                            # Convert generic "Small Key" / "Map" to dungeon-specific AP names
+                            if item_name in ("Small Key", "Map"):
+                                ap_loc = _LOC_TABLE.get(loc_name)
+                                dungeon = _REGION_TO_DUNGEON.get(ap_loc.region) if ap_loc else None
+                                if dungeon:
+                                    if item_name == "Small Key":
+                                        item_name = f"{dungeon} Small Key"
+                                        _generic_key_converted += 1
+                                    else:
+                                        item_name = f"{dungeon} Map"
+                                        _generic_map_converted += 1
+                                else:
+                                    # Fallback: parse area from location name prefix
+                                    area_prefix = loc_name.split(" - ")[0] if " - " in loc_name else ""
+                                    fallback_dungeon = _REGION_TO_DUNGEON.get(area_prefix)
+                                    if fallback_dungeon:
+                                        if item_name == "Small Key":
+                                            item_name = f"{fallback_dungeon} Small Key"
+                                            _generic_key_converted += 1
+                                        else:
+                                            item_name = f"{fallback_dungeon} Map"
+                                            _generic_map_converted += 1
+                            
                             sshd_item_pool[item_name] += 1
+                            if is_excluded:
+                                _items_from_excluded.append((loc_name, item_name))
+                
+                if _generic_key_converted > 0 or _generic_map_converted > 0:
+                    print(f"[__init__.py] Converted generic items: {_generic_key_converted} Small Keys, {_generic_map_converted} Maps -> dungeon-specific names")
                 
                 if locations_excluded > 0:
-                    print(f"[__init__.py] Skipped {locations_excluded} non-shuffled locations from item pool")
+                    print(f"[__init__.py] Excluded {locations_excluded} locations (items still in pool)")
+                
+                if _items_from_excluded:
+                    print(f"[__init__.py] Recovered {len(_items_from_excluded)} items from excluded locations into pool")
                 
                 # Also count starting items (they were removed from pool during generation)
                 sshd_starting_pool = Counter()
@@ -1035,8 +1286,12 @@ class SSHDWorld(World):
                 self._sshd_resolved_settings = resolved_settings
                 
                 # Sync AP options to match resolved settings so the spoiler log
-                # and fill_slot_data display the real config.yaml values
-                self._sync_ap_options_from_resolved(resolved_settings)
+                # and fill_slot_data display the real config.yaml values.
+                # Pass the original ap_settings (config.yaml input) so that only
+                # settings the user explicitly set are synced — avoids overwriting
+                # AP-YAML values with sshd-rando defaults.
+                self._sync_ap_options_from_resolved(resolved_settings,
+                                                    config_settings=ap_settings)
                 
             except Exception as e:
                 print(f"[__init__.py] Warning: Could not extract resolved settings: {e}")
@@ -1057,6 +1312,7 @@ class SSHDWorld(World):
             self._sshd_resolved_settings = {}
             self._sshd_full_item_pool = {}
             self._sshd_starting_pool = {}
+            self._sshd_excluded_locations = set()
     
     def create_item(self, name: str) -> Item:
         """Create an item by name."""
@@ -1300,9 +1556,16 @@ class SSHDWorld(World):
             item_pool.append(self.create_item(junk_name))
             junk_idx += 1
         
-        # If we have more items than locations (shouldn't happen normally), trim
+        # If we have more items than locations (can happen when items from
+        # excluded locations are recovered into the pool), trim non-progression first
         if len(item_pool) > total_locations:
-            print(f"[__init__.py] WARNING: Pool has {len(item_pool)} items but only {total_locations} locations, trimming excess")
+            excess = len(item_pool) - total_locations
+            print(f"[__init__.py] Pool has {len(item_pool)} items but only {total_locations} locations, trimming {excess} items")
+            # Sort: progression first, then useful, then filler/trap — trim from the end
+            item_pool.sort(key=lambda i: (
+                0 if i.classification == IC.progression else
+                1 if i.classification == IC.useful else 2
+            ))
             item_pool = item_pool[:total_locations]
         
         print(f"[__init__.py] Created item pool:")
@@ -1358,6 +1621,85 @@ class SSHDWorld(World):
     
     # All dungeons (AP location regions that are considered "dungeons")
     ALL_DUNGEON_REGIONS: set[str] = set(DUNGEON_ITEM_NAMES.keys())
+    
+    # Minimum small-key count required to reach each AP region (YAML area) inside
+    # a dungeon.  Derived from the sshd-rando YAML exit requirements.  Regions
+    # not listed default to 0 (reachable from the dungeon entrance without keys).
+    # Used by _place_restricted_items to prevent placing a key behind its own door.
+    _KEY_GATED_REGIONS: dict[str, dict[str, int]] = {
+        "Skyview Temple": {
+            # 1-key door: SVT First Hub Center Room → SVT Second Hub Center Room
+            "SVT Second Hub Center Room": 1,
+            "SVT Miniboss Room": 1,
+            "SVT Second Hub Left Rooms": 1,
+            # 2-key door: SVT Second Hub Center Room → SVT Staldra Room
+            "SVT Staldra Room": 2,
+            "SVT Last Room Before Spider": 2,
+            "SVT Last Room Before Rope": 2,
+            "SVT Last Room After Rope": 2,
+            "SVT Last Room Near Chest after Vines": 2,
+            "Skyview Boss Room": 2,
+            "Skyview Spring": 2,
+        },
+        "Lanayru Mining Facility": {
+            # 1-key door: LMF First Hub → LMF Key Locked Room
+            "LMF Key Locked Room": 1,
+        },
+        "Ancient Cistern": {
+            # Both key doors require all 2 keys
+            "AC Back Room": 2,
+            "AC Inside Statue": 2,
+            "AC Basement": 2,
+            "AC Under the Statue": 2,
+            "AC Basement Rotating Vines": 2,
+            "AC Basement Bone Pile with Long Thread": 2,
+            "AC Platform with Thread to Basement": 2,
+            "AC Platform Before Boss": 2,
+            "Ancient Cistern Boss Room": 2,
+            "Ancient Cistern Flame Room": 2,
+        },
+        "Fire Sanctuary": {
+            # 1-key door: FS First Room Past Water Plants → FS First Outside
+            "FS First Outside Section": 1,
+            "FS First Magmanos Room": 1,
+            "FS First Magmanos Room Balcony": 1,
+            "FS South Bridge": 1,
+            "FS Room with First Lava River": 1,
+            "FS Room with First Lava River Past River": 1,
+            "FS First Trapped Mogma Room Upper": 1,
+            "FS North Bridge West Side": 1,
+            "FS North Bridge Bottom": 1,
+            "FS North Bridge East Side": 1,
+            "FS Second Trapped Mogma Room": 1,
+            "FS Under Magmanos Fight Room Past Sliding Door": 1,
+            # 2-key door: FS Room w/ First Lava River Past River → FS Water Fruit Room
+            "FS Water Fruit Room": 2,
+            "FS Water Fruit Room After Frog": 2,
+            "FS Magmanos Fight Room": 2,
+            "FS First Trapped Mogma Room Lower": 2,
+            "FS Under Magmanos Fight Room": 2,
+            # 3-key door: FS Under Magmanos Fight Room → FS West of Boss Door Before Lava River
+            "FS West of Boss Door Before Lava River": 3,
+            "FS West of Boss Door": 3,
+            "FS In Front of Boss Door": 3,
+            "FS In Front of Boss Door Past Bars": 3,
+            "FS Lizalfos Fight Room": 3,
+            "FS Staircase Room Lower": 3,
+            "FS Staricase Room Upper": 3,
+            "FS Boss Key Room": 3,
+            "Fire Sanctuary Boss Room": 3,
+            "Fire Sanctuary Flame Room": 3,
+        },
+        "Sandship": {
+            # All key doors require all 2 keys
+            "Sandship Captain's Cabin": 2,
+            "Sandship Ship's Bow": 2,
+        },
+        "Sky Keep": {
+            # 1-key door: SK Ancient Cistern Room South → SK Sacred Power of Farore Room
+            "SK Sacred Power of Farore Room": 1,
+        },
+    }
     
     # Maps each dungeon to its parent "hint region" (the overworld area outside the dungeon).
     # Used for "own_region" key shuffle mode.
@@ -1440,15 +1782,26 @@ class SSHDWorld(World):
         This pulls restricted items out of the general multiworld.itempool and places
         them into only valid locations using fill_restrictive, so Archipelago's fill
         algorithm respects the player's key/map shuffle settings.
+        
+        Placement order (earlier phases have higher priority):
+          1. Triforce pieces at required dungeon end locations
+          2. Progressive Swords at dungeon end locations
+          3. Other progression at dungeon end locations
+          4. Small keys, boss keys, maps (restricted by shuffle mode)
+          5. Triforce Shuffle fallback (vanilla / sky_keep only if not already placed)
         """
         from .Locations import LOCATION_TABLE
-        from Fill import fill_restrictive
+        # fill_restrictive is no longer used — direct placement handles all
+        # dungeon-restricted items since sshd-rando verified completability.
         
         small_key_mode = self.options.small_key_shuffle.current_key   # e.g. "own_dungeon"
         boss_key_mode = self.options.boss_key_shuffle.current_key     # e.g. "own_dungeon" 
         map_mode = self.options.map_shuffle.current_key               # e.g. "own_dungeon_restricted"
+        triforce_mode = self.options.triforce_shuffle.current_key     # e.g. "anywhere"
+        required_count = self.options.required_dungeon_count.value
         
-        print(f"[__init__.py] pre_fill: small_keys={small_key_mode}, boss_keys={boss_key_mode}, map_mode={map_mode}")
+        print(f"[__init__.py] pre_fill (v2-direct): small_keys={small_key_mode}, boss_keys={boss_key_mode}, "
+              f"map_mode={map_mode}, triforce={triforce_mode}, required_dungeons={required_count}")
         
         # "anywhere" and "removed" modes need no restriction — AP fill handles them.
         # "vanilla" is handled by sshd-rando's fill, but we also enforce it here.
@@ -1512,7 +1865,16 @@ class SSHDWorld(World):
                 return []
         
         def _place_restricted_items(item_type: str, mode: str, items_by_dungeon: dict[str, list]):
-            """Place items restricted to valid locations per dungeon."""
+            """Place items restricted to valid locations per dungeon using direct placement.
+            
+            For small keys, uses _KEY_GATED_REGIONS to ensure keys are never placed
+            behind the doors they open (e.g., the 2nd AC Small Key can't go in a
+            location behind the 2-key door).  Keys are placed greedily: key K of N
+            is placed only in a location reachable with K-1 keys.
+            
+            For boss keys and maps, simple random placement is fine since they don't
+            gate access to the regions where they can be found.
+            """
             if mode in ("anywhere", "removed"):
                 return  # No restriction — leave items in the general pool
             
@@ -1522,41 +1884,220 @@ class SSHDWorld(World):
                     
                 valid_locations = _get_valid_locations_for_mode(mode, dungeon)
                 
+                # Boss keys must NEVER go in boss-locked locations (behind the
+                # boss door): "Defeat Boss" and dungeon reward/flame locations.
+                if item_type == "boss_keys":
+                    boss_locked = set(DUNGEON_END_LOCATIONS.get(dungeon, []))
+                    boss_locked.add(f"{dungeon} - Defeat Boss")
+                    before = len(valid_locations)
+                    valid_locations = [loc for loc in valid_locations
+                                       if loc.name not in boss_locked]
+                    excluded = before - len(valid_locations)
+                    if excluded:
+                        print(f"[__init__.py] Excluded {excluded} boss-locked location(s) "
+                              f"from {dungeon} boss key placement")
+                
                 if not valid_locations:
                     print(f"[__init__.py] WARNING: No valid locations for {item_type} "
                           f"in {dungeon} with mode={mode}. Leaving in general pool.")
-                    # Put items back in general pool as fallback
                     self.multiworld.itempool.extend(items)
                     continue
                 
-                if len(items) > len(valid_locations):
-                    print(f"[__init__.py] WARNING: {len(items)} {item_type} items for {dungeon} "
-                          f"but only {len(valid_locations)} valid locations with mode={mode}. "
-                          f"Placing what we can, rest goes to general pool.")
-                
-                # Shuffle locations for randomness
-                self.random.shuffle(valid_locations)
-                
-                try:
-                    fill_restrictive(
-                        self.multiworld,
-                        self.multiworld.get_all_state(False),
-                        valid_locations,
-                        items,
-                        single_player_placement=True,
-                        lock=True,
-                        allow_partial=True,
-                        name=f"SSHD {item_type} ({dungeon})",
-                    )
-                except Exception as e:
-                    print(f"[__init__.py] WARNING: fill_restrictive failed for {item_type} "
-                          f"in {dungeon}: {e}. Remaining items go to general pool.")
-                
-                # Any items not placed go back to the general pool
-                if items:
-                    print(f"[__init__.py] {len(items)} {item_type} items could not be "
-                          f"placed in {dungeon}, adding to general pool")
-                    self.multiworld.itempool.extend(items)
+                # For small keys, place in logic order to avoid self-locking.
+                key_gates = self._KEY_GATED_REGIONS.get(dungeon, {})
+                if item_type == "small_keys" and key_gates:
+                    # Classify each location by the minimum keys needed to reach it.
+                    locs_by_tier: dict[int, list] = {}
+                    for loc in valid_locations:
+                        region_name = loc.parent_region.name if loc.parent_region else ""
+                        min_keys = key_gates.get(region_name, 0)
+                        locs_by_tier.setdefault(min_keys, []).append(loc)
+                    
+                    # Shuffle within each tier
+                    for tier_locs in locs_by_tier.values():
+                        self.random.shuffle(tier_locs)
+                    
+                    n_keys = len(items)
+                    placed_count = 0
+                    for k in range(n_keys):
+                        # Key (k+1) needs a location reachable with at most k keys.
+                        # Collect all locations from tiers 0..k.
+                        candidates = []
+                        for tier in sorted(locs_by_tier.keys()):
+                            if tier <= k:
+                                candidates.extend(locs_by_tier[tier])
+                        
+                        if candidates:
+                            loc = candidates.pop(0)
+                            # Remove from the tier so it's not reused
+                            tier_key = key_gates.get(
+                                loc.parent_region.name if loc.parent_region else "", 0
+                            )
+                            if loc in locs_by_tier.get(tier_key, []):
+                                locs_by_tier[tier_key].remove(loc)
+                            
+                            item = items.pop(0)
+                            loc.place_locked_item(item)
+                            placed_count += 1
+                        else:
+                            print(f"[__init__.py] WARNING: No safe location for "
+                                  f"key {k+1}/{n_keys} in {dungeon}")
+                            break
+                    
+                    if placed_count > 0:
+                        print(f"[__init__.py] Placed {placed_count} {item_type} in {dungeon} "
+                              f"(logic-aware)")
+                    if items:
+                        print(f"[__init__.py] WARNING: {len(items)} excess {item_type} for {dungeon}")
+                        self.multiworld.itempool.extend(items)
+                else:
+                    # Non-key items or dungeons with no key gates: simple random placement
+                    self.random.shuffle(valid_locations)
+                    
+                    placed_count = 0
+                    while items and valid_locations:
+                        item = items.pop(0)
+                        loc = valid_locations.pop(0)
+                        loc.place_locked_item(item)
+                        placed_count += 1
+                    
+                    if placed_count > 0:
+                        print(f"[__init__.py] Placed {placed_count} {item_type} in {dungeon}")
+                    
+                    if items:
+                        print(f"[__init__.py] WARNING: {len(items)} excess {item_type} for {dungeon} "
+                              f"(not enough locations), adding to general pool")
+                        self.multiworld.itempool.extend(items)
+        
+        # ── End-of-Dungeon Priority Placement (FIRST) ───────────────────
+        # Place Triforce pieces and important progression items at dungeon
+        # end locations BEFORE keys/maps, so keys can't steal these slots.
+        
+        DUNGEON_END_LOCATIONS: dict[str, list[str]] = {
+            "Skyview Temple": [
+                "Skyview Spring - Strike Crest",
+            ],
+            "Earth Temple": [
+                "Earth Spring - Strike Crest",
+            ],
+            "Lanayru Mining Facility": [
+                "Lanayru Mining Facility - Exit Hall of Ancient Robots",
+            ],
+            "Ancient Cistern": [
+                "Ancient Cistern - Farore's Flame",
+            ],
+            "Sandship": [
+                "Sandship - Nayru's Flame",
+            ],
+            "Fire Sanctuary": [
+                "Fire Sanctuary - Din's Flame",
+            ],
+            "Sky Keep": [
+                "Sky Keep - Sacred Power of Din",
+                "Sky Keep - Sacred Power of Nayru",
+                "Sky Keep - Sacred Power of Farore",
+            ],
+        }
+        
+        include_sky_keep = self.options.dungeons_include_sky_keep.value
+        
+        if required_count > 0:
+            main_dungeons = [
+                "Skyview Temple", "Earth Temple", "Lanayru Mining Facility",
+                "Ancient Cistern", "Sandship", "Fire Sanctuary",
+            ]
+            eligible_dungeons = list(main_dungeons)
+            if include_sky_keep:
+                eligible_dungeons.append("Sky Keep")
+            
+            # Randomly select which dungeons are required
+            selected_count = min(required_count, len(eligible_dungeons))
+            self.random.shuffle(eligible_dungeons)
+            selected_dungeons = eligible_dungeons[:selected_count]
+            
+            # Store the selection so _generate_sshd_patches can sync Fi's text
+            self._ap_required_dungeons = list(selected_dungeons)
+            
+            # Collect unfilled end-of-dungeon locations for the selected dungeons
+            end_loc_names: set[str] = set()
+            for dungeon in selected_dungeons:
+                end_loc_names.update(DUNGEON_END_LOCATIONS.get(dungeon, []))
+            
+            def _get_unfilled_end_locations() -> list:
+                return [
+                    loc for loc in self.multiworld.get_locations(self.player)
+                    if loc.address is not None
+                    and loc.item is None
+                    and loc.name in end_loc_names
+                ]
+            
+            available_end_locs = _get_unfilled_end_locations()
+            print(f"[__init__.py] pre_fill: End-of-dungeon placement for {selected_count} dungeons: "
+                  f"{selected_dungeons} ({len(available_end_locs)} available end locations)")
+            
+            # Phase 1: Triforce pieces (highest priority)
+            # Direct placement — sshd-rando verified completability, so we just
+            # need triforces at dungeon end locations without AP reachability checks.
+            triforce_end_items = _collect_items_from_pool([
+                "Triforce of Courage", "Triforce of Power", "Triforce of Wisdom"
+            ])
+            if triforce_end_items:
+                locs = _get_unfilled_end_locations()
+                self.random.shuffle(locs)
+                self.random.shuffle(triforce_end_items)
+                placed_count = 0
+                while triforce_end_items and locs:
+                    item = triforce_end_items.pop(0)
+                    loc = locs.pop(0)
+                    loc.place_locked_item(item)
+                    placed_count += 1
+                print(f"[__init__.py] pre_fill: Placed {placed_count}/3 Triforce pieces at dungeon ends")
+                if triforce_end_items:
+                    self.multiworld.itempool.extend(triforce_end_items)
+            
+            # Phase 2: Progressive Swords (second priority)
+            sword_end_items = _collect_items_from_pool(["Progressive Sword"])
+            if sword_end_items:
+                locs = _get_unfilled_end_locations()
+                self.random.shuffle(locs)
+                sword_count = len(sword_end_items)
+                placed = 0
+                while sword_end_items and locs:
+                    item = sword_end_items.pop(0)
+                    loc = locs.pop(0)
+                    loc.place_locked_item(item)
+                    placed += 1
+                print(f"[__init__.py] pre_fill: Placed {placed}/{sword_count} Progressive Swords at dungeon ends")
+                if sword_end_items:
+                    self.multiworld.itempool.extend(sword_end_items)
+            
+            # Phase 3: Other progression items (lowest priority, fill remaining slots)
+            remaining_end_locs = _get_unfilled_end_locations()
+            if remaining_end_locs:
+                other_progression = [
+                    item for item in self.multiworld.itempool
+                    if item.player == self.player and item.classification == IC.progression
+                ]
+                if other_progression:
+                    # Remove from pool temporarily
+                    other_set = set(id(item) for item in other_progression)
+                    self.multiworld.itempool = [
+                        item for item in self.multiworld.itempool
+                        if id(item) not in other_set
+                    ]
+                    self.random.shuffle(remaining_end_locs)
+                    self.random.shuffle(other_progression)
+                    other_count = len(other_progression)
+                    placed = 0
+                    while other_progression and remaining_end_locs:
+                        item = other_progression.pop(0)
+                        loc = remaining_end_locs.pop(0)
+                        loc.place_locked_item(item)
+                        placed += 1
+                    
+                    print(f"[__init__.py] pre_fill: Placed {placed}/{other_count} other progression items at dungeon ends")
+                    if other_progression:
+                        self.multiworld.itempool.extend(other_progression)
         
         # ── Small Keys ───────────────────────────────────────────────────
         if small_key_mode not in ("anywhere", "removed"):
@@ -1570,8 +2111,11 @@ class SSHDWorld(World):
             print(f"[__init__.py] pre_fill: Placing {total_sk} small keys with mode={small_key_mode}")
             _place_restricted_items("small_keys", small_key_mode, small_key_items)
         
-        # ── Boss Keys ────────────────────────────────────────────────────
+        # ── Boss Keys (logic-aware placement) ─────────────────────────
         if boss_key_mode not in ("anywhere", "removed"):
+            from Fill import sweep_from_pool
+            from BaseClasses import CollectionState
+
             boss_key_items: dict[str, list] = {}
             for dungeon, info in self.DUNGEON_ITEM_NAMES.items():
                 items = _collect_items_from_pool(info["boss_keys"])
@@ -1580,7 +2124,61 @@ class SSHDWorld(World):
             
             total_bk = sum(len(v) for v in boss_key_items.values())
             print(f"[__init__.py] pre_fill: Placing {total_bk} boss keys with mode={boss_key_mode}")
-            _place_restricted_items("boss_keys", boss_key_mode, boss_key_items)
+
+            # Sweep with the FULL item pool to find the maximum reachability.
+            # This tells us which dungeon locations are reachable if all items
+            # are placed optimally.
+            pool_list = list(self.multiworld.itempool)
+            max_state = sweep_from_pool(
+                CollectionState(self.multiworld),
+                pool_list
+            )
+
+            reachable_set = max_state.reachable_regions.get(self.player, set())
+            all_regions = list(self.multiworld.regions.region_cache.get(self.player, {}).values())
+            print(f"[__init__.py] sweep_from_pool: {len(reachable_set)}/{len(all_regions)} regions reachable")
+
+            for dungeon, items in boss_key_items.items():
+                if not items:
+                    continue
+                valid_locations = _get_valid_locations_for_mode(boss_key_mode, dungeon)
+                # Exclude boss-locked locations (Defeat Boss + dungeon reward)
+                boss_locked = set(DUNGEON_END_LOCATIONS.get(dungeon, []))
+                boss_locked.add(f"{dungeon} - Defeat Boss")
+                before = len(valid_locations)
+                valid_locations = [loc for loc in valid_locations
+                                   if loc.name not in boss_locked]
+                excluded = before - len(valid_locations)
+                if excluded:
+                    print(f"[__init__.py] Excluded {excluded} boss-locked location(s) "
+                          f"from {dungeon} boss key placement")
+
+                if not valid_locations:
+                    print(f"[__init__.py] WARNING: No valid locations for boss_keys "
+                          f"in {dungeon}. Adding to general pool.")
+                    self.multiworld.itempool.extend(items)
+                    continue
+
+                # Prefer locations reachable with maximum exploration
+                reachable = [loc for loc in valid_locations
+                             if loc.can_reach(max_state)]
+                self.random.shuffle(reachable)
+                
+                if reachable:
+                    loc = reachable[0]
+                    loc.place_locked_item(items.pop(0))
+                    print(f"[__init__.py] Placed 1 boss_keys in {dungeon} "
+                          f"(reachable: {loc.name})")
+                else:
+                    # Fallback: place in any valid location (best effort)
+                    self.random.shuffle(valid_locations)
+                    loc = valid_locations[0]
+                    loc.place_locked_item(items.pop(0))
+                    print(f"[__init__.py] Placed 1 boss_keys in {dungeon} "
+                          f"(fallback, no reachable location found: {loc.name})")
+                
+                if items:
+                    self.multiworld.itempool.extend(items)
         
         # ── Dungeon Maps ─────────────────────────────────────────────────
         if map_mode not in ("anywhere",):
@@ -1623,34 +2221,30 @@ class SSHDWorld(World):
                 
                 if valid_locs:
                     self.random.shuffle(valid_locs)
-                    try:
-                        fill_restrictive(
-                            self.multiworld,
-                            self.multiworld.get_all_state(False),
-                            valid_locs,
-                            lc_items,
-                            single_player_placement=True,
-                            lock=True,
-                            allow_partial=True,
-                            name="SSHD Lanayru Caves Keys",
-                        )
-                    except Exception as e:
-                        print(f"[__init__.py] WARNING: fill_restrictive failed for Lanayru Caves keys: {e}")
+                    placed = 0
+                    while lc_items and valid_locs:
+                        item = lc_items.pop(0)
+                        loc = valid_locs.pop(0)
+                        loc.place_locked_item(item)
+                        placed += 1
+                    if placed:
+                        print(f"[__init__.py] Placed {placed} Lanayru Caves keys")
                 
-                # Any remaining go to general pool
                 if lc_items:
                     self.multiworld.itempool.extend(lc_items)
         
-        # ── Triforce Shuffle ─────────────────────────────────────────────
+        # ── Triforce Shuffle Fallback ────────────────────────────────────
+        # Only applies if triforces weren't placed at dungeon ends above.
+        # Handle vanilla/sky_keep modes for any triforces still in the pool.
         triforce_mode = self.options.triforce_shuffle.current_key
-        if triforce_mode != "anywhere":
+        if triforce_mode not in ("anywhere",):
             triforce_items = _collect_items_from_pool([
                 "Triforce of Courage",
                 "Triforce of Power",
                 "Triforce of Wisdom"
             ])
             if triforce_items:
-                print(f"[__init__.py] pre_fill: Placing {len(triforce_items)} Triforce pieces with mode={triforce_mode}")
+                print(f"[__init__.py] pre_fill: Triforce Shuffle fallback - placing {len(triforce_items)} remaining Triforce pieces with mode={triforce_mode}")
                 
                 if triforce_mode == "vanilla":
                     # Restrict to the 3 vanilla Sky Keep locations
@@ -1679,167 +2273,18 @@ class SSHDWorld(World):
                 
                 if valid_locs:
                     self.random.shuffle(valid_locs)
-                    try:
-                        fill_restrictive(
-                            self.multiworld,
-                            self.multiworld.get_all_state(False),
-                            valid_locs,
-                            triforce_items,
-                            single_player_placement=True,
-                            lock=True,
-                            allow_partial=True,
-                            name="SSHD Triforce Pieces",
-                        )
-                    except Exception as e:
-                        print(f"[__init__.py] WARNING: fill_restrictive failed for Triforce pieces: {e}")
+                    placed = 0
+                    while triforce_items and valid_locs:
+                        item = triforce_items.pop(0)
+                        loc = valid_locs.pop(0)
+                        loc.place_locked_item(item)
+                        placed += 1
+                    if placed:
+                        print(f"[__init__.py] Placed {placed} Triforce pieces at {triforce_mode} locations")
                 
-                # Any remaining go to general pool
                 if triforce_items:
                     print(f"[__init__.py] {len(triforce_items)} Triforce pieces could not be placed, adding to general pool")
                     self.multiworld.itempool.extend(triforce_items)
-        
-        # ── End-of-Dungeon Priority Placement ────────────────────────────
-        # Place important progression items at dungeon completion locations.
-        # Priority order: Triforce pieces > Progressive Swords > other progression.
-        
-        DUNGEON_END_LOCATIONS: dict[str, list[str]] = {
-            "Skyview Temple": [
-                "Skyview Spring - Strike Crest",
-            ],
-            "Earth Temple": [
-                "Earth Spring - Strike Crest",
-            ],
-            "Lanayru Mining Facility": [
-                "Lanayru Mining Facility - Exit Hall of Ancient Robots",
-            ],
-            "Ancient Cistern": [
-                "Ancient Cistern - Farore's Flame",
-            ],
-            "Sandship": [
-                "Sandship - Nayru's Flame",
-            ],
-            "Fire Sanctuary": [
-                "Fire Sanctuary - Din's Flame",
-            ],
-            "Sky Keep": [
-                "Sky Keep - Sacred Power of Din",
-                "Sky Keep - Sacred Power of Nayru",
-                "Sky Keep - Sacred Power of Farore",
-            ],
-        }
-        
-        required_count = self.options.required_dungeon_count.value
-        include_sky_keep = self.options.dungeons_include_sky_keep.value
-        
-        if required_count > 0:
-            main_dungeons = [
-                "Skyview Temple", "Earth Temple", "Lanayru Mining Facility",
-                "Ancient Cistern", "Sandship", "Fire Sanctuary",
-            ]
-            eligible_dungeons = list(main_dungeons)
-            if include_sky_keep:
-                eligible_dungeons.append("Sky Keep")
-            
-            # Randomly select which dungeons are required
-            selected_count = min(required_count, len(eligible_dungeons))
-            self.random.shuffle(eligible_dungeons)
-            selected_dungeons = eligible_dungeons[:selected_count]
-            
-            # Collect unfilled end-of-dungeon locations for the selected dungeons
-            end_loc_names: set[str] = set()
-            for dungeon in selected_dungeons:
-                end_loc_names.update(DUNGEON_END_LOCATIONS.get(dungeon, []))
-            
-            def _get_unfilled_end_locations() -> list:
-                return [
-                    loc for loc in self.multiworld.get_locations(self.player)
-                    if loc.address is not None
-                    and loc.item is None
-                    and loc.name in end_loc_names
-                ]
-            
-            print(f"[__init__.py] pre_fill: End-of-dungeon placement for {selected_count} dungeons: "
-                  f"{selected_dungeons} ({len(_get_unfilled_end_locations())} available end locations)")
-            
-            # Phase 1: Triforce pieces (highest priority)
-            triforce_end_items = _collect_items_from_pool([
-                "Triforce of Courage", "Triforce of Power", "Triforce of Wisdom"
-            ])
-            if triforce_end_items:
-                locs = _get_unfilled_end_locations()
-                self.random.shuffle(locs)
-                try:
-                    fill_restrictive(
-                        self.multiworld,
-                        self.multiworld.get_all_state(False),
-                        locs,
-                        triforce_end_items,
-                        single_player_placement=True,
-                        lock=True,
-                        allow_partial=True,
-                        name="SSHD End-of-Dungeon Triforces",
-                    )
-                except Exception as e:
-                    print(f"[__init__.py] WARNING: fill_restrictive failed for end-of-dungeon triforces: {e}")
-                print(f"[__init__.py] pre_fill: Placed {3 - len(triforce_end_items)}/3 Triforce pieces at dungeon ends")
-                if triforce_end_items:
-                    self.multiworld.itempool.extend(triforce_end_items)
-            
-            # Phase 2: Progressive Swords (second priority)
-            sword_end_items = _collect_items_from_pool(["Progressive Sword"])
-            if sword_end_items:
-                locs = _get_unfilled_end_locations()
-                self.random.shuffle(locs)
-                sword_count = len(sword_end_items)
-                try:
-                    fill_restrictive(
-                        self.multiworld,
-                        self.multiworld.get_all_state(False),
-                        locs,
-                        sword_end_items,
-                        single_player_placement=True,
-                        lock=True,
-                        allow_partial=True,
-                        name="SSHD End-of-Dungeon Swords",
-                    )
-                except Exception as e:
-                    print(f"[__init__.py] WARNING: fill_restrictive failed for end-of-dungeon swords: {e}")
-                print(f"[__init__.py] pre_fill: Placed {sword_count - len(sword_end_items)}/{sword_count} Progressive Swords at dungeon ends")
-                if sword_end_items:
-                    self.multiworld.itempool.extend(sword_end_items)
-            
-            # Phase 3: Other progression items (lowest priority, fill remaining slots)
-            remaining_end_locs = _get_unfilled_end_locations()
-            if remaining_end_locs:
-                other_progression = [
-                    item for item in self.multiworld.itempool
-                    if item.player == self.player and item.classification == IC.progression
-                ]
-                if other_progression:
-                    # Remove from pool temporarily
-                    other_set = set(id(item) for item in other_progression)
-                    self.multiworld.itempool = [
-                        item for item in self.multiworld.itempool
-                        if id(item) not in other_set
-                    ]
-                    self.random.shuffle(remaining_end_locs)
-                    other_count = len(other_progression)
-                    try:
-                        fill_restrictive(
-                            self.multiworld,
-                            self.multiworld.get_all_state(False),
-                            remaining_end_locs,
-                            other_progression,
-                            single_player_placement=True,
-                            lock=True,
-                            allow_partial=True,
-                            name="SSHD End-of-Dungeon Other Progression",
-                        )
-                    except Exception as e:
-                        print(f"[__init__.py] WARNING: fill_restrictive failed for end-of-dungeon other progression: {e}")
-                    print(f"[__init__.py] pre_fill: Placed {other_count - len(other_progression)}/{other_count} other progression items at dungeon ends")
-                    if other_progression:
-                        self.multiworld.itempool.extend(other_progression)
         
         print(f"[__init__.py] pre_fill complete")
 
@@ -2164,6 +2609,23 @@ class SSHDWorld(World):
                 print(f"Warning: sshd-rando-backend not available")
                 print("Patch file will only contain item/location mappings")
             
+            # Build patcher_data: all the information needed by the standalone
+            # patcher to reproduce the romfs/exefs from the end user's own ROM.
+            # This allows the host to generate the multiworld WITHOUT needing
+            # the ROM, and lets end users patch locally.
+            patcher_data = {
+                "ap_settings": self._collect_archipelago_settings(),
+                "multiworld_item_mapping": self._build_multiworld_item_mapping(),
+                "custom_flag_mapping": {
+                    str(k): v for k, v in
+                    (self._custom_flag_mapping if hasattr(self, '_custom_flag_mapping')
+                     else self._build_custom_flag_mapping()).items()
+                },
+                "seed": self.multiworld.seed,
+                "sshd_setting_string": getattr(self, '_sshd_setting_string', ""),
+                "sshdr_seed": self.options.sshdr_seed.value if self.options.sshdr_seed.value else None,
+            }
+            
             # Create the .apsshd patch file
             patch_file_name = f"AP_{self.multiworld.seed}_P{self.player}_{self.player_name}.apsshd"
             patch_file_path = os.path.join(output_directory, patch_file_name)
@@ -2176,6 +2638,7 @@ class SSHDWorld(World):
                     "player_id": self.player,
                     "seed": self.multiworld.seed,
                     "version": WORLD_VERSION,
+                    "has_rom_patches": bool(romfs_path and exefs_path),
                 }
                 zip_file.writestr("manifest.json", json.dumps(manifest, indent=2))
                 
@@ -2194,7 +2657,11 @@ class SSHDWorld(World):
                 serializable_patch_data = convert_sets_to_lists(patch_data)
                 zip_file.writestr("patch_data.json", json.dumps(serializable_patch_data, indent=2))
                 
-                # Include romfs if generated
+                # Write patcher data for standalone patcher use
+                serializable_patcher_data = convert_sets_to_lists(patcher_data)
+                zip_file.writestr("patcher_data.json", json.dumps(serializable_patcher_data, indent=2))
+                
+                # Include romfs if generated (host had ROM available)
                 if romfs_path and romfs_path.exists():
                     for root, dirs, files in os.walk(romfs_path):
                         for file in files:
@@ -2202,13 +2669,17 @@ class SSHDWorld(World):
                             arc_path = f"romfs/{file_path.relative_to(romfs_path)}"
                             zip_file.write(file_path, arc_path)
                 
-                # Include exefs if generated
+                # Include exefs if generated (host had ROM available)
                 if exefs_path and exefs_path.exists():
                     for root, dirs, files in os.walk(exefs_path):
                         for file in files:
                             file_path = Path(root) / file
                             arc_path = f"exefs/{file_path.relative_to(exefs_path)}"
                             zip_file.write(file_path, arc_path)
+                
+                if not (romfs_path and exefs_path):
+                    print(f"[__init__.py] .apsshd created WITHOUT rom patches (patcher_data.json included)")
+                    print(f"[__init__.py] End users can generate patches using: ArchipelagoSSHDPatcher.exe {patch_file_name}")
             
         finally:
             # Clean up temp directory
@@ -2282,6 +2753,13 @@ class SSHDWorld(World):
             from .SSHDRWrapper import inject_custom_flags_into_world
             inject_custom_flags_into_world(world, self._custom_flag_mapping, self.multiworld, self.player)
             print(f"[__init__.py] ✓ Injected {len(self._custom_flag_mapping)} custom flags")
+            
+            # Sync required-dungeon flags so Fi's text matches AP's selection
+            ap_required = getattr(self, '_ap_required_dungeons', None)
+            if ap_required is not None:
+                for name, dun in world.dungeons.items():
+                    dun.required = name in ap_required
+                print(f"[__init__.py] Synced required dungeons to AP selection: {ap_required}")
             
             # Apply patches with the overlaid items
             # This generates the romfs/exefs with Archipelago items in them
