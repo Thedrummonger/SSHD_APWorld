@@ -707,9 +707,14 @@ class GameItemSystem:
                 elif stage_bytes != self._last_known_stage:
                     self._last_known_stage = stage_bytes
                     self._stage_cooldown_until = time.time() + self._STAGE_COOLDOWN_SECS
+                    # Invalidate the buffer address cache — heap allocations
+                    # can move during a scene transition and a stale address
+                    # would corrupt game memory.
+                    self.buffer_addr = None
+                    self._buffer_verified = False
                     logger.debug(
                         f"Stage transition detected — cooldown until "
-                        f"{self._stage_cooldown_until:.1f}"
+                        f"{self._stage_cooldown_until:.1f}, buffer cache invalidated"
                     )
             if time.time() < self._stage_cooldown_until:
                 logger.debug("Player not ready: stage-transition cooldown active")

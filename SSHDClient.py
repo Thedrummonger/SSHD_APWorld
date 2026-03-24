@@ -1394,6 +1394,14 @@ class SSHDContext(CommonContext):
         self.slot_options: Dict[str, Any] = {}  # Player options from slot data
         self.killed_by_deathlink: bool = False  # Flag to prevent sending death when killed by death link
         
+        # Scene-transition cooldown — blocks ALL memory writes (cheats,
+        # bird-statue enforcement, AP stats, item delivery) while the game
+        # is tearing down / rebuilding scene structures.  Without this,
+        # writes during the transition can corrupt game objects and cause
+        # null-pointer crashes (e.g. Groosenator → Flooded Faron).
+        self._scene_transition_cooldown_until: float = 0.0
+        self._SCENE_TRANSITION_COOLDOWN_SECS: float = 4.0
+        
         # BreathLink state tracking
         self.last_breath_link: float = 0.0      # For BreathLink echo prevention
         self.last_stamina: Optional[int] = None  # Previous stamina reading (for detecting depletion)
@@ -2196,6 +2204,19 @@ class SSHDContext(CommonContext):
                 logger.debug(f"Entered stage: {stage_name}")
                 self.current_stage = stage_name
                 
+                # Scene-transition cooldown: block ALL memory writes for
+                # a few seconds so the engine finishes tearing down / rebuilding
+                # scene structures, actors, and heaps.  This prevents cheat
+                # writes, bird-statue enforcement, and AP stats writes from
+                # corrupting game memory mid-transition.
+                self._scene_transition_cooldown_until = (
+                    time.time() + self._SCENE_TRANSITION_COOLDOWN_SECS
+                )
+                logger.debug(
+                    f"Scene transition cooldown active until "
+                    f"{self._scene_transition_cooldown_until:.1f}"
+                )
+                
                 # Auto-enable the entry bird statue when first visiting a
                 # surface region so the player always has a spawn point.
                 region = _stage_to_region(stage_name)
@@ -2210,15 +2231,20 @@ class SSHDContext(CommonContext):
                                 f"(first visit to {region})"
                             )
             
-            # Write AP buffers to game memory (item info table + check stats)
-            self._write_ap_item_info_table()
-            self._update_ap_check_stats()
+            # Skip all memory writes during scene-transition cooldown.
+            # Reads (locations, death/breath link, custom flags) are safe.
+            _in_transition = time.time() < self._scene_transition_cooldown_until
+            
+            if not _in_transition:
+                # Write AP buffers to game memory (item info table + check stats)
+                self._write_ap_item_info_table()
+                self._update_ap_check_stats()
             
             # Process deferred progressive-item flag writes
             self._process_deferred_flag_writes()
             
             # Give queued items to player
-            if self.item_queue:
+            if self.item_queue and not _in_transition:
                 item_data = self.item_queue[0]
                 
                 # Start-inventory items (precollected) are already baked into the
@@ -2358,7 +2384,8 @@ class SSHDContext(CommonContext):
             # Enforce bird-statue flags: clear any that the game's
             # HD-progression system auto-unlocked without the player
             # physically visiting the statue.
-            self._enforce_bird_statue_flags()
+            if not _in_transition:
+                self._enforce_bird_statue_flags()
             
             # Send any newly checked locations to server (locations not yet sent)
             new_locations = self.checked_locations.difference(self.sent_locations)
@@ -2400,6 +2427,8 @@ class SSHDContext(CommonContext):
         # screens.  The game tears down and rebuilds player/save structures
         # during loads; writing to those offsets mid-transition can corrupt
         # game memory and crash the emulator.
+        if time.time() < self._scene_transition_cooldown_until:
+            return
         try:
             stage = self.memory.read_string(
                 OFFSET_CURRENT_STAGE + OFFSET_STAGE_NAME, 8
