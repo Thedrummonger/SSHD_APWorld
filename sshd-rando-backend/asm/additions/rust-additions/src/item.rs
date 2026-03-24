@@ -166,11 +166,10 @@ pub extern "C" fn give_item(itemid: u8) {
 #[no_mangle]
 pub extern "C" fn give_item_with_sceneflag(itemid: u8, sceneflag: u8) -> *mut dAcItem {
     unsafe {
-        // TEMP FIX: ROOM_MGR check disabled due to ASLR relocation issues
-        // TODO: Implement proper symbol relocation or dynamic ROOM_MGR lookup
-        // if ROOM_MGR.is_null() {
-        //     return core::ptr::null_mut();
-        // }
+        // Safety: ROOM_MGR can be null during scene transitions.
+        if ROOM_MGR.is_null() {
+            return core::ptr::null_mut();
+        }
 
         NUMBER_OF_ITEMS = 0;
         ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
@@ -202,6 +201,11 @@ pub extern "C" fn give_item_with_sceneflag(itemid: u8, sceneflag: u8) -> *mut dA
 #[no_mangle]
 pub extern "C" fn give_item_with_archipelago_flag(itemid: u8, custom_flag: u16) -> *mut dAcItem {
     unsafe {
+        // Safety: ROOM_MGR can be null during scene transitions.
+        if ROOM_MGR.is_null() {
+            return core::ptr::null_mut();
+        }
+
         NUMBER_OF_ITEMS = 0;
         ITEM_GET_BOTTLE_POUCH_SLOT = 0xFFFFFFFF;
 
@@ -292,6 +296,13 @@ pub extern "C" fn spawn_appeared_chest(tbox: *mut dAcTbox) -> *mut dAcTbox {
         asm!("mov x19, {0:x}", in(reg) tbox);
 
         if 0.910 > (*tbox).anim_completion_amount && (*tbox).anim_completion_amount > 0.905 {
+            // Safety: ROOM_MGR can be null during scene transitions.
+            if ROOM_MGR.is_null() {
+                asm!("ldr w8, [{0:x}, #0x1988]", in(reg) tbox);
+                asm!("mov w9, {0:w}", in(reg) w9_bkp);
+                return tbox;
+            }
+
             let mut new_param1 = (*tbox).base.basebase.members.param1;
 
             let current_pos = (*tbox).base.members.base.pos;
@@ -1779,6 +1790,10 @@ pub extern "C" fn setup_gossip_stone_item_params(
             param2,
         ) as *mut dAcItem;
 
+        if item_actor.is_null() {
+            return item_actor;
+        }
+
         (*item_actor).prevent_timed_despawn = 1;
 
         return item_actor;
@@ -2065,6 +2080,15 @@ pub extern "C" fn archipelago_check_item_buffer() {
             // so no async pre-load is needed — spawn immediately.
 
             AP_FORCE_FALLBACK_MODEL = true;
+
+            // Safety: ROOM_MGR can be null during scene transitions.
+            // The stage-cooldown check above should prevent us from
+            // reaching here, but as an extra safety net, bail out if
+            // ROOM_MGR was torn down between the cooldown check and now.
+            if ROOM_MGR.is_null() {
+                AP_FORCE_FALLBACK_MODEL = false;
+                return;
+            }
 
             let player_pos_ptr = core::ptr::addr_of_mut!((*PLAYER_PTR).obj_base_members.base.pos);
 

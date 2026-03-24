@@ -1401,6 +1401,7 @@ class SSHDContext(CommonContext):
         # null-pointer crashes (e.g. Groosenator → Flooded Faron).
         self._scene_transition_cooldown_until: float = 0.0
         self._SCENE_TRANSITION_COOLDOWN_SECS: float = 4.0
+        self._last_next_stage: Optional[str] = None  # For early transition detection via NEXT_STAGE
         
         # BreathLink state tracking
         self.last_breath_link: float = 0.0      # For BreathLink echo prevention
@@ -2144,6 +2145,7 @@ class SSHDContext(CommonContext):
                     self._bird_statue_enforcement_log.clear()
                     self._visited_regions.clear()
                     self._deferred_flag_writes.clear()
+                    self._last_next_stage = None
 
                     # Immediately attempt a new base-address scan instead of
                     # waiting for the next cycle (which would spin doing
@@ -2198,6 +2200,33 @@ class SSHDContext(CommonContext):
             if not stage_name or len(stage_name) == 0:
                 # Game not loaded yet (title screen, loading, etc.)
                 return
+            
+            # Early transition detection via NEXT_STAGE.
+            # The game sets NEXT_STAGE before tearing down ROOM_MGR and
+            # other scene structures, whereas CURRENT_STAGE only changes
+            # once loading is underway.  Monitoring NEXT_STAGE lets us
+            # activate the scene-transition cooldown earlier, closing a
+            # race window where the Rust AP-buffer code could dereference
+            # a null ROOM_MGR.
+            try:
+                next_stage = self.memory.read_string(
+                    OFFSET_NEXT_STAGE + OFFSET_STAGE_NAME, 8
+                )
+                if next_stage and next_stage != self._last_next_stage:
+                    # NEXT_STAGE changed — a scene transition is imminent.
+                    if (self._last_next_stage is not None
+                            and next_stage != stage_name
+                            and time.time() >= self._scene_transition_cooldown_until):
+                        logger.debug(
+                            f"Early transition detected via NEXT_STAGE: "
+                            f"{self._last_next_stage} -> {next_stage}"
+                        )
+                        self._scene_transition_cooldown_until = (
+                            time.time() + self._SCENE_TRANSITION_COOLDOWN_SECS
+                        )
+                    self._last_next_stage = next_stage
+            except Exception:
+                pass  # Non-critical; fall through to CURRENT_STAGE detection
             
             # Update current stage
             if stage_name != self.current_stage:
@@ -2435,6 +2464,20 @@ class SSHDContext(CommonContext):
             )
             if not stage:
                 return
+            # Early transition detection: if NEXT_STAGE differs from
+            # CURRENT_STAGE, a scene transition is starting.  Bail out
+            # immediately to avoid writing to structures being rebuilt.
+            try:
+                next_stage = self.memory.read_string(
+                    OFFSET_NEXT_STAGE + OFFSET_STAGE_NAME, 8
+                )
+                if next_stage and next_stage != stage:
+                    self._scene_transition_cooldown_until = (
+                        time.time() + self._SCENE_TRANSITION_COOLDOWN_SECS
+                    )
+                    return
+            except Exception:
+                pass
         except Exception:
             return
 

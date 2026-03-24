@@ -1250,6 +1250,14 @@ pub extern "C" fn spawn_actor(
         ACTORBASE_ROOMID = roomid;
         ACTORBASE_SUBTYPE = 0;
 
+        // Safety: ROOM_MGR can be null during scene transitions while the
+        // game tears down and rebuilds room structures.  Dereferencing a
+        // null ROOM_MGR would crash (null-pointer access at offset of
+        // connect_node within RoomMgr).
+        if ROOM_MGR.is_null() {
+            return core::ptr::null_mut();
+        }
+
         let connect_parent: *const ActorTreeNode =
             from_ref(&(*ROOM_MGR).base.members.members.actor_mgr.connect_node);
         let group_type: u8 = 2; // 0 = other, 1 = scene, 2 = actor, 3 = unk

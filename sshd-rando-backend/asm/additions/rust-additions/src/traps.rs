@@ -190,7 +190,9 @@ pub extern "C" fn update_traps() {
                 } as *mut math::Vec3f;
 
                 // Only spawn Groose if not in a Silent Realm because it lags for 2-3 seconds
-                if &CURRENT_STAGE_NAME[..1] != b"S" || &CURRENT_STAGE_NAME[..7] == b"D003_8\0" {
+                if (&CURRENT_STAGE_NAME[..1] != b"S" || &CURRENT_STAGE_NAME[..7] == b"D003_8\0")
+                    && !ROOM_MGR.is_null()
+                {
                     actor::spawn_actor(
                         actor::ACTORID::NPC_RVL,
                         (*ROOM_MGR).roomid.into(),
