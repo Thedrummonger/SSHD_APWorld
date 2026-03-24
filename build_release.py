@@ -56,9 +56,8 @@ def main():
     from build_patcher_exe import build_patcher_exe
     patcher_exe_path = build_patcher_exe()
 
-    patcher_exe_file = dist_dir / f"{patcher_folder_name}.exe"
-    if not patcher_exe_file.exists():
-        print(f"[FAIL] Patcher exe not found at {patcher_exe_file}")
+    if not patcher_exe_path.exists():
+        print(f"[FAIL] Patcher exe not found at {patcher_exe_path}")
         sys.exit(1)
 
     print()
@@ -91,8 +90,9 @@ def main():
     print(f"  Added: {client_folder_name}/ (standalone client)")
 
     # Copy standalone patcher exe (single file)
-    shutil.copy2(patcher_exe_file, release_dir / f"{patcher_folder_name}.exe")
-    print(f"  Added: {patcher_folder_name}.exe (standalone patcher)")
+    patcher_release_name = f"{patcher_folder_name}.exe" if sys.platform == "win32" else patcher_folder_name
+    shutil.copy2(patcher_exe_path, release_dir / patcher_release_name)
+    print(f"  Added: {patcher_release_name} (standalone patcher)")
 
     # Copy individual release files alongside the client folder
     extra_files = {

@@ -18,6 +18,7 @@ cache/
 *.zip
 SSHD_Archipelago_Release.zip
 sshd-rando-backend/asm/additions/rust-additions/target/
+ArchipelagoSSHDClient
 
 # PyInstaller spec files (auto-generated)
 *.spec
