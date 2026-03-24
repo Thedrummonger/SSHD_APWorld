@@ -20,7 +20,8 @@ from pathlib import Path
 # only OpenGL 1.1 (GDI Generic) is available.  Force the ANGLE backend which
 # ships with kivy_deps.angle and provides a software OpenGL ES context that
 # satisfies Kivy's minimum requirement (OpenGL 2.0).
-os.environ.setdefault("KIVY_GL_BACKEND", "angle_sdl2")
+if sys.platform == "win32":
+    os.environ.setdefault("KIVY_GL_BACKEND", "angle_sdl2")
 
 
 def build_client_exe():
@@ -30,6 +31,7 @@ def build_client_exe():
     dist_dir = source_dir / "dist"
     exe_name = "ArchipelagoSSHDClient"
     spec_path = source_dir / f"{exe_name}.spec"
+    is_windows = sys.platform == "win32"
 
     print("=" * 60)
     print("  Building ArchipelagoSSHDClient.exe")
@@ -48,13 +50,15 @@ def build_client_exe():
 
     required = {
         "psutil": "psutil",
-        "pymem": "pymem",
         "websockets": "websockets",
         "yaml": "pyyaml",
         "kivy": "kivy",
         "kivymd": "kivymd",
         "platformdirs": "platformdirs",
     }
+    if is_windows:
+        required["pymem"] = "pymem"
+
     for mod, pip_name in required.items():
         try:
             __import__(mod)
@@ -171,6 +175,7 @@ from PyInstaller.utils.hooks import collect_data_files
 import sys, os
 
 block_cipher = None
+is_windows = sys.platform == "win32"
 
 # Collect all kivy + kivymd data files (fonts, images, .kv, etc.)
 kivy_datas = collect_data_files('kivy')
@@ -197,7 +202,7 @@ hiddenimports = [
     # kivy core providers
     'kivy.core.window', 'kivy.core.window.window_sdl2',
     'kivy.core.text', 'kivy.core.text.text_sdl2',
-    'kivy.core.clipboard', 'kivy.core.clipboard.clipboard_winctypes',
+    'kivy.core.clipboard',
     'kivy.core.image', 'kivy.core.image.img_sdl2', 'kivy.core.image.img_pil',
     'kivy.core.image.img_tex', 'kivy.core.image.img_dds',
     'kivy.core.audio', 'kivy.core.audio.audio_sdl2',
@@ -233,7 +238,6 @@ hiddenimports = [
     'kivy.uix.stencilview', 'kivy.uix.scatter',
     # kivy input
     'kivy.input', 'kivy.input.providers',
-    'kivy.input.providers.wm_touch', 'kivy.input.providers.wm_pen',
     'kivy.input.providers.mouse',
     'kivy.input.postproc',
     # kivy misc
@@ -254,7 +258,6 @@ hiddenimports = [
     'kivymd.material_resources',
     # other deps
     'psutil',
-    'pymem', 'pymem.process',
     'process_memory',
     'websockets', 'websockets.legacy', 'websockets.legacy.client',
     'websockets.client',
@@ -262,8 +265,16 @@ hiddenimports = [
     'platformdirs',
     'colorama',
     'typing_extensions',
-    'win32timezone',
 ]
+
+if is_windows:
+    hiddenimports += [
+        'kivy.core.clipboard.clipboard_winctypes',
+        'kivy.input.providers.wm_touch',
+        'kivy.input.providers.wm_pen',
+        'pymem', 'pymem.process',
+        'win32timezone',
+    ]
 
 # Modules to exclude (reduce size)
 excludes = [
@@ -337,9 +348,7 @@ coll = COLLECT(
 
     # ── Verify output ─────────────────────────────────────────────
     exe_folder = dist_dir / exe_name
-    exe_path = exe_folder / f"{exe_name}.exe"
-    if not exe_path.exists():
-        exe_path = exe_folder / exe_name  # non-Windows
+    exe_path = exe_folder / (f"{exe_name}.exe" if is_windows else exe_name)
 
     if not exe_path.exists():
         print(f"[FAIL] Executable not found at {exe_path}")
