@@ -222,6 +222,8 @@ def patch_dusk_relic(
     itemid: int,
     object_id_and_scene_flag_str: str,
     trapid: int,
+    custom_flag: int = 0x3FF,
+    original_itemid: int = 0,
 ) -> None:
 
     # Don't change anything if this is a dusk relic
@@ -268,6 +270,15 @@ def patch_dusk_relic(
     params1 = mask_shift_set(params1, 0x1, 9, 0)
 
     freestanding_item["params1"] = params1
+
+    # Encode Archipelago custom_flag into params2 bits 8-17 (same as Item actors)
+    if custom_flag != -1:
+        freestanding_item["params2"] = mask_shift_set(
+            freestanding_item["params2"], 0x3FF, 8, custom_flag
+        )
+        freestanding_item["params2"] = mask_shift_set(
+            freestanding_item["params2"], 0x3F, 18, original_itemid
+        )
 
 
 def patch_bucha(
@@ -360,7 +371,7 @@ def patch_closet(
     closet["params1"] = mask_shift_set(closet["params1"], 0x1, 16, 1)
 
 
-def patch_ac_key_boko(bzs: dict, itemid: int, object_id_str: str, trapid: int):
+def patch_ac_key_boko(bzs: dict, itemid: int, object_id_str: str, trapid: int, custom_flag: int = 0x3FF):
     id = int(object_id_str, 16)
     boko: dict | None = next(
         filter(lambda x: x["name"] == "EBc" and x["id"] == id, bzs["OBJ "]), None
@@ -379,6 +390,12 @@ def patch_ac_key_boko(bzs: dict, itemid: int, object_id_str: str, trapid: int):
         boko["params2"] = mask_shift_set(boko["params2"], 0xF, 8, 0xF)
 
     boko["params2"] = mask_shift_set(boko["params2"], 0xFF, 0x0, itemid)
+
+    # Encode Archipelago custom_flag into params2 bits 18-27 (10 bits)
+    if custom_flag != 0x3FF:
+        boko["params2"] = mask_shift_set(
+            boko["params2"], 0x3FF, 18, custom_flag
+        )
 
 
 def patch_heart_container(bzs: dict, itemid: int, trapid: int, custom_flag: int = 0x3FF):
@@ -462,7 +479,7 @@ def patch_tree_of_life(bzs: dict, itemid: int, trapid: int, custom_flag: int = 0
         )
 
 
-def patch_digspot_item(bzs: dict, itemid: int, object_id_str: str, trapid: int):
+def patch_digspot_item(bzs: dict, itemid: int, object_id_str: str, trapid: int, custom_flag: int = 0x3FF):
     id = int(object_id_str)
     digspot: dict | None = next(
         filter(
@@ -486,7 +503,14 @@ def patch_digspot_item(bzs: dict, itemid: int, object_id_str: str, trapid: int):
 
     # patch digspot to be the same as key piece digspots in all ways except it keeps it's initial sceneflag
     digspot["params1"] = (digspot["params1"] & 0xFF0) | 0xFF0B1004
-    digspot["params2"] = mask_shift_set(digspot["params2"], 0xFF, 0x18, itemid)
+    # Store itemid in params2 bits 0-7 (ASM reads from offset 0x12C)
+    digspot["params2"] = mask_shift_set(digspot["params2"], 0xFF, 0x0, itemid)
+
+    # Encode Archipelago custom_flag into params2 bits 18-27 (10 bits)
+    if custom_flag != 0x3FF:
+        digspot["params2"] = mask_shift_set(
+            digspot["params2"], 0x3FF, 18, custom_flag
+        )
 
 
 def patch_goddess_crest(bzs: dict, itemid: int, index: str, trapid: int, custom_flag: int = 0x3FF):
@@ -1167,6 +1191,8 @@ class StagePatchHandler:
                             itemid,
                             objectid,
                             trapid,
+                            custom_flag,
+                            original_itemid,
                         )
                     elif object_name == "NpcKyuE":
                         patch_bucha(
@@ -1192,6 +1218,7 @@ class StagePatchHandler:
                             itemid,
                             objectid,
                             trapid,
+                            custom_flag,
                         )
                     elif object_name == "HeartCo":
                         patch_heart_container(
@@ -1213,6 +1240,7 @@ class StagePatchHandler:
                             itemid,
                             objectid,
                             trapid,
+                            custom_flag,
                         )
                     elif object_name == "SwSB":
                         patch_goddess_crest(
